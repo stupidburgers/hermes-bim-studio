@@ -1,0 +1,16 @@
+name: hermes-bim-studio
+label: Hermes BIM Studio
+kind: standalone
+version: 0.1.0
+author: stupidburgers
+license: MIT
+homepage: https://github.com/stupidburgers/hermes-bim-studio
+description: >
+  Building Information Modeling (BIM) inspection, 5D quantity takeoff engine,
+  and embedded 3D WebGL building model viewer for construction engineering.
+requires_hermes: ">=0.22.0"
+provides_tools:
+  - bim_inspect
+  - bim_takeoff
+  - bim_render_view
+provides_hooks: []
