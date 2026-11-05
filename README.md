@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/stupidburgers/hermes-bim-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/stupidburgers/hermes-bim-studio/actions/workflows/ci.yml)
 
-**The premier BIM, 3D Building Inspection, and 5D Quantity Takeoff Plugin for Hermes Agent.**
+**An IFC model-inspection and quantity-reporting plugin for Hermes Agent.**
 
 Built for the **Hermes Agent Plugin Hackathon** (Nous Research, Nov 2026, $20,000 cash prizes).
 Owner: `stupidburgers`
@@ -11,18 +11,22 @@ Owner: `stupidburgers`
 
 ## What It Does
 
-Hermes BIM Studio transforms Hermes Agent into an AI-powered Construction Engineer and BIM Auditor:
+Hermes BIM Studio provides Hermes with a local IFC inspection, quantity-reporting, and interactive model-viewing workflow:
 1. **Semantic BIM Ingestion:** Directly parses standard IFC2x3, IFC4, and IFC4X3 building models using native `ifcopenshell`.
-2. **Deterministic Quantity Takeoff (QTO):** Computes exact physical quantities (wall gross/net areas $m^2$, slab and structural concrete volumes $m^3$, beam lengths, door/window counts) using real 3D geometry calculations — zero LLM hallucination.
-3. **Model & Compliance Auditing:** Checks for spatial anomalies (uncontained elements, missing property sets, zero-volume geometry, code compliance rule violations).
-4. **5D Cost Estimation:** Mappings to unit cost composition tables to produce auditable, professional budget workbooks (.xlsx) with SHA-256 cryptographic audit trails.
-5. **Embedded 3D BIM Viewer:** Generates interactive Three.js 3D building visualizations directly inside the Hermes Desktop preview pane (`::preview{file="..."}`), featuring full orbit controls, element inspection, storey isolation, and visual clash/audit highlighting.
+2. **Transparent IFC quantities:** Reports `BaseQuantities.NetSideArea` for walls and `BaseQuantities.NetVolume` for slabs, converts using the quantity's IFC unit, and shows measured coverage/missing values. Door and window quantities are entity counts. It does not invent a quantity where the model omits one.
+3. **Model-quality checks:** Flags missing spatial containment and unnamed walls/slabs. These limited checks are not building-code or regulatory compliance certification.
+4. **Optional cost arithmetic:** Uses only rates the user supplies; a total, when available, covers only the four listed categories (walls, slabs, doors, windows), not the whole project. This is not a professional bid or quantity-surveying certification.
+5. **Embedded 3D viewer:** Generates a self-contained Three.js page for orbit/zoom and click-to-inspect element identity, displayed in Hermes Desktop preview.
 
 ---
 
-## Competitive Edge & Hackathon Fit
+## AEC workflow fit
 
-- **Zero Catalog Saturation:** 0 BIM or IFC plugins exist in the catalog or open PRs.
-- **Beyond Prompts & Skills:** Employs geometric boundary-representation engines and WebGL rendering that no prompt or basic skill can duplicate.
-- **85-Second Video Punch:** Delivers a complete user journey from raw IFC drop to 3D interactive orbit and verified 5D cost spreadsheet.
-- **100% Local & Reliable:** Runs purely on Python on Windows, no external API keys or vendor subscriptions required.
+- **Specific data surface:** IFC model quantities and interactive geometry are more than a prompt-only workflow.
+- **Transparent limits:** quantities depend on exporter-supplied IFC BaseQuantities; unsupported or missing values are reported, not estimated.
+- **Local runtime:** the viewer embeds its JavaScript dependencies and the plugin does not need an external service or API key at runtime.
+- **Demo status:** the short demo is still to be recorded and must show a real model, its reported coverage, and the generated viewer.
+
+## Third-party viewer assets
+
+The viewer bundles Three.js r128 and OrbitControls under the upstream MIT license. See [`plugin/vendor/THIRD_PARTY_NOTICES.md`](plugin/vendor/THIRD_PARTY_NOTICES.md).
