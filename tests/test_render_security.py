@@ -37,6 +37,19 @@ class TestViewerEscaping(unittest.TestCase):
             self.assertIn("&lt;/script&gt;&lt;script&gt;window.__ifc_xss = true&lt;/script&gt;", html)
             self.assertIn(r"\u003c/script\u003e\u003cscript\u003ewindow.__ifc_xss = true\u003c/script\u003e", html)
 
+    def test_render_limit_rejects_values_outside_supported_range(self):
+        with tempfile.TemporaryDirectory(dir=OUTPUT_DIR) as temp_dir:
+            for limit in (-1, 151):
+                with self.subTest(limit=limit):
+                    output_path = os.path.join(temp_dir, f"viewer-{limit}.html")
+                    response = handle_bim_render_view({
+                        "ifc_path": IFC_PATH,
+                        "output_html": output_path,
+                        "max_elements": limit,
+                    })
+                    self.assertIn("max_elements must be between 0 and 150", response)
+                    self.assertFalse(os.path.exists(output_path))
+
     def test_excel_formula_like_text_is_neutralized(self):
         self.assertEqual(_excel_literal("=1+1"), "'=1+1")
         self.assertEqual(_excel_literal("  =1+1"), "'  =1+1")
