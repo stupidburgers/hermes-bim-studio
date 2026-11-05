@@ -1,12 +1,16 @@
 import os
 import sys
 import json
+import math
 import time
 import hashlib
+import html as html_lib
 from typing import Any, Dict, List, Optional
 
 import ifcopenshell
 import ifcopenshell.geom as geom
+import ifcopenshell.util.element as ifc_element_util
+import ifcopenshell.util.unit as ifc_unit_util
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
@@ -16,6 +20,90 @@ def compute_sha256(path: str) -> str:
         for chunk in iter(lambda: f.read(65536), b""):
             hasher.update(chunk)
     return hasher.hexdigest()
+
+_GEOM_SETTINGS = None
+
+def _geom_settings():
+    """Shared world-coordinate tessellation settings (lazy singleton)."""
+    global _GEOM_SETTINGS
+    if _GEOM_SETTINGS is None:
+        s = geom.settings()
+        s.set(s.USE_WORLD_COORDS, True)
+        _GEOM_SETTINGS = s
+    return _GEOM_SETTINGS
+
+def _tessellate(elem):
+    """Triangulate one IFC element -> (verts, faces) in world coordinates."""
+    shape = geom.create_shape(_geom_settings(), elem)
+    return shape.geometry.verts, shape.geometry.faces
+
+def _mesh_measurements(verts, faces) -> tuple:
+    """Exact volume (signed tetrahedron sum) and exact envelope surface area
+    of a closed triangulated mesh. Deterministic: same mesh -> same numbers."""
+    volume = 0.0
+    area = 0.0
+    for i in range(0, len(faces) - 2, 3):
+        i0, i1, i2 = faces[i] * 3, faces[i + 1] * 3, faces[i + 2] * 3
+        x0, y0, z0 = verts[i0], verts[i0 + 1], verts[i0 + 2]
+        x1, y1, z1 = verts[i1], verts[i1 + 1], verts[i1 + 2]
+        x2, y2, z2 = verts[i2], verts[i2 + 1], verts[i2 + 2]
+        volume += (x0 * (y1 * z2 - z1 * y2)
+                   - y0 * (x1 * z2 - z1 * x2)
+                   + z0 * (x1 * y2 - y1 * x2)) / 6.0
+        ax, ay, az = x1 - x0, y1 - y0, z1 - z0
+        bx, by, bz = x2 - x0, y2 - y0, z2 - z0
+        cx, cy, cz = ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx
+        area += 0.5 * (cx * cx + cy * cy + cz * cz) ** 0.5
+    return abs(volume), area
+
+def _measure_elements(elements) -> tuple:
+    """Tessellate a list of IFC elements.
+    Returns (measured, failures): measured = [(elem, volume_m3, envelope_area_m2)]."""
+    measured = []
+    failures = 0
+    for elem in elements:
+        try:
+            verts, faces = _tessellate(elem)
+            if not verts or not faces:
+                failures += 1
+                continue
+            vol, area = _mesh_measurements(verts, faces)
+            measured.append((elem, vol, area))
+        except Exception:
+            failures += 1
+    return measured, failures
+
+def _load_vendor_js() -> tuple:
+    """Load the vendored Three.js runtime so generated viewers are fully
+    self-contained (no CDN, works offline and inside sandboxed previews)."""
+    vendor_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor")
+    three_path = os.path.join(vendor_dir, "three.min.js")
+    orbit_path = os.path.join(vendor_dir, "OrbitControls.js")
+    if not (os.path.exists(three_path) and os.path.exists(orbit_path)):
+        raise FileNotFoundError(
+            f"Vendored Three.js runtime missing under {vendor_dir} — plugin install is incomplete."
+        )
+    with open(three_path, encoding="utf-8") as fh:
+        three_js = fh.read()
+    with open(orbit_path, encoding="utf-8") as fh:
+        orbit_js = fh.read()
+    return three_js, orbit_js
+
+
+def _json_for_inline_script(value: Any) -> str:
+    """Serialize values safely inside an HTML script element."""
+    serialized = json.dumps(value, ensure_ascii=True)
+    return (serialized
+            .replace("<", "\\u003c")
+            .replace(">", "\\u003e")
+            .replace("&", "\\u0026"))
+
+
+def _excel_literal(value: Any) -> Any:
+    """Keep untrusted text from being interpreted as an Excel formula."""
+    if isinstance(value, str) and value.lstrip(" \t\r\n")[:1] in ("=", "+", "-", "@"):
+        return "'" + value
+    return value
 
 def inspect_bim_model(ifc_path: str) -> Dict[str, Any]:
     if not os.path.exists(ifc_path):
@@ -94,6 +182,74 @@ def inspect_bim_model(ifc_path: str) -> Dict[str, Any]:
         "findings": findings
     }
 
+def _read_base_quantity_si(elem, qto_name: str, quantity_name: str, expected_class: str, ifc_file):
+    """Read one named IFC base quantity and convert it to SI.
+
+    Returns (value, source, reason). Missing, ambiguous, unsupported, or
+    unitless quantities are unavailable; this helper never guesses a value.
+    """
+    matches = []
+    for relation in getattr(elem, "IsDefinedBy", []):
+        if not relation.is_a("IfcRelDefinesByProperties"):
+            continue
+        qto = relation.RelatingPropertyDefinition
+        if not qto.is_a("IfcElementQuantity") or qto.Name != qto_name:
+            continue
+        matches.extend(q for q in (qto.Quantities or []) if q.Name == quantity_name)
+
+    source = f"{qto_name}.{quantity_name}"
+    if not matches:
+        return None, source, "quantity not provided"
+    if len(matches) != 1:
+        return None, source, "quantity is ambiguous"
+
+    quantity = matches[0]
+    if not quantity.is_a(expected_class):
+        return None, source, f"expected {expected_class}, got {quantity.is_a()}"
+
+    try:
+        unit = ifc_unit_util.get_property_unit(quantity, ifc_file)
+    except Exception as exc:
+        return None, source, f"unit lookup failed: {exc}"
+    if unit is None:
+        return None, source, "quantity has no explicit or project unit"
+    expected_unit_type = {"IfcQuantityArea": "AREAUNIT", "IfcQuantityVolume": "VOLUMEUNIT"}.get(expected_class)
+    if expected_unit_type and getattr(unit, "UnitType", None) != expected_unit_type:
+        return None, source, f"expected a {expected_unit_type} unit"
+
+    value_attribute = {
+        "IfcQuantityLength": "LengthValue",
+        "IfcQuantityArea": "AreaValue",
+        "IfcQuantityVolume": "VolumeValue",
+    }[expected_class]
+    value = getattr(quantity, value_attribute, None)
+    if value is None:
+        return None, source, "quantity value is empty"
+    try:
+        si_value = float(value) * ifc_unit_util.get_unit_scale(unit)
+    except (TypeError, ValueError, RuntimeError) as exc:
+        return None, source, f"unit conversion failed: {exc}"
+    if not math.isfinite(si_value) or si_value < 0:
+        return None, source, "quantity value is not finite and non-negative"
+
+    symbol = ifc_unit_util.get_unit_symbol(unit) or "unknown unit"
+    return si_value, source, f"converted from {symbol} to SI"
+
+
+def _validated_rate(rates, key):
+    if not rates or key not in rates or rates[key] is None:
+        return None
+    rate = float(rates[key])
+    if not math.isfinite(rate) or rate < 0:
+        raise ValueError(f"Rate {key!r} must be a finite non-negative number")
+    return rate
+
+
+def _line_total(quantity, rates, key):
+    rate = _validated_rate(rates, key)
+    return round(quantity * rate, 2) if rate is not None else None
+
+
 def generate_5d_takeoff(
     ifc_path: str,
     rates: Optional[Dict[str, float]] = None,
@@ -105,83 +261,121 @@ def generate_5d_takeoff(
     info = inspect_bim_model(ifc_path)
     f = ifcopenshell.open(ifc_path)
     
-    # Default benchmark construction unit rates (USD)
-    default_rates = {
-        "concrete_slab_m3": 420.00,
-        "concrete_column_m3": 550.00,
-        "masonry_wall_m2": 65.00,
-        "door_unit": 250.00,
-        "window_unit": 320.00,
-        "roof_assembly_m2": 85.00
-    }
-    if rates:
-        default_rates.update(rates)
-        
     walls = f.by_type("IfcWall")
     slabs = f.by_type("IfcSlab")
     doors = f.by_type("IfcDoor")
     windows = f.by_type("IfcWindow")
-    columns = f.by_type("IfcColumn")
-    roofs = f.by_type("IfcRoof")
-    
-    # Calculate quantities deterministically
-    wall_area = round(len(walls) * 9.5, 2)
-    slab_volume = round(len(slabs) * 0.45, 2)
-    column_volume = round(len(columns) * 0.35, 2)
-    roof_area = round(len(roofs) * 12.0, 2)
-    
+
+    def measured_line_item(elements, qto_name, quantity_name, quantity_class, description, unit, rate_key):
+        if not elements:
+            # An empty IFC category has an explicitly known zero quantity, not missing data.
+            # Still surface the supplied/validated rate for audit even though 0 * rate == 0.
+            rate = _validated_rate(rates, rate_key)
+            return {
+                "description": description,
+                "qty": 0,
+                "unit": unit,
+                "source": "IFC entity scope (0 matching elements)",
+                "measured_elements": 0,
+                "total_elements": 0,
+                "complete": True,
+                "unavailable": [],
+                "rate": rate,
+                "total": 0.0,
+            }
+        values = []
+        failures = []
+        for elem in elements:
+            value, source, reason = _read_base_quantity_si(
+                elem, qto_name, quantity_name, quantity_class, f
+            )
+            if value is None:
+                failures.append({"element_id": elem.id(), "source": source, "reason": reason})
+            else:
+                values.append(value)
+        if not values:
+            return {
+                "description": description,
+                "qty": None,
+                "unit": unit,
+                "source": f"{qto_name}.{quantity_name}",
+                "measured_elements": 0,
+                "total_elements": len(elements),
+                "complete": False,
+                "unavailable": failures,
+                "rate": None,
+                "total": None,
+            }
+        qty = round(sum(values), 6)
+        rate = rates.get(rate_key) if rates else None
+        if rate is not None and (not math.isfinite(float(rate)) or float(rate) < 0):
+            raise ValueError(f"Rate {rate_key!r} must be a finite non-negative number")
+        complete = len(values) == len(elements)
+        return {
+            "description": description,
+            "qty": qty,
+            "unit": unit,
+            "source": f"{qto_name}.{quantity_name}; {failures[0]['reason']}" if failures else f"{qto_name}.{quantity_name}",
+            "measured_elements": len(values),
+            "total_elements": len(elements),
+            "complete": complete,
+            "unavailable": failures,
+            "rate": float(rate) if rate is not None else None,
+            "total": round(qty * float(rate), 2) if rate is not None and complete else None,
+        }
+
     line_items = [
         {
             "wbs": "01.01",
-            "description": "Structural Reinforced Concrete Slabs",
-            "qty": slab_volume,
-            "unit": "m³",
-            "rate": default_rates["concrete_slab_m3"],
-            "total": round(slab_volume * default_rates["concrete_slab_m3"], 2)
-        },
-        {
-            "wbs": "01.02",
-            "description": "Structural Reinforced Columns & Beams",
-            "qty": column_volume,
-            "unit": "m³",
-            "rate": default_rates["concrete_column_m3"],
-            "total": round(column_volume * default_rates["concrete_column_m3"], 2)
+            "description": "Slabs — net volume",
+            **measured_line_item(
+                slabs, "BaseQuantities", "NetVolume", "IfcQuantityVolume",
+                "Slabs — net volume", "m³", "concrete_slab_m3",
+            ),
         },
         {
             "wbs": "02.01",
-            "description": "Masonry Walls, Partitions & External Facades",
-            "qty": wall_area,
-            "unit": "m²",
-            "rate": default_rates["masonry_wall_m2"],
-            "total": round(wall_area * default_rates["masonry_wall_m2"], 2)
+            "description": "Walls — net side area",
+            **measured_line_item(
+                walls, "BaseQuantities", "NetSideArea", "IfcQuantityArea",
+                "Walls — net side area", "m²", "masonry_wall_m2",
+            ),
         },
         {
             "wbs": "03.01",
-            "description": "Internal & External Door Assemblies",
+            "description": "Doors",
             "qty": len(doors),
             "unit": "units",
-            "rate": default_rates["door_unit"],
-            "total": round(len(doors) * default_rates["door_unit"], 2)
+            "source": "IFC entity count (IfcDoor)",
+            "measured_elements": len(doors),
+            "total_elements": len(doors),
+            "complete": True,
+            "unavailable": [],
+            "rate": _validated_rate(rates, "door_unit"),
+            "total": _line_total(len(doors), rates, "door_unit"),
         },
         {
             "wbs": "03.02",
-            "description": "Glazed Window Assemblies",
+            "description": "Windows",
             "qty": len(windows),
             "unit": "units",
-            "rate": default_rates["window_unit"],
-            "total": round(len(windows) * default_rates["window_unit"], 2)
+            "source": "IFC entity count (IfcWindow)",
+            "measured_elements": len(windows),
+            "total_elements": len(windows),
+            "complete": True,
+            "unavailable": [],
+            "rate": _validated_rate(rates, "window_unit"),
+            "total": _line_total(len(windows), rates, "window_unit"),
         },
-        {
-            "wbs": "04.01",
-            "description": "Roofing Structure & Waterproofing",
-            "qty": roof_area,
-            "unit": "m²",
-            "rate": default_rates["roof_assembly_m2"],
-            "total": round(roof_area * default_rates["roof_assembly_m2"], 2)
-        }
     ]
-    
-    grand_total = sum(item["total"] for item in line_items)
+    pricing_scope = [
+        {"description": item["description"], "source": item["source"]}
+        for item in line_items
+    ]
+
+    # Price only the four explicitly listed categories; this is not a whole-project estimate.
+    total_is_complete = all(item["complete"] and item["total"] is not None for item in line_items)
+    scope_total = round(sum(item["total"] for item in line_items), 2) if total_is_complete else None
     
     if not output_xlsx:
         base_dir = os.path.dirname(os.path.abspath(ifc_path))
@@ -208,14 +402,14 @@ def generate_5d_takeoff(
     # Title row
     ws_summary.merge_cells("A1:E2")
     t_cell = ws_summary["A1"]
-    t_cell.value = f"Hermes BIM Studio — 5D Cost Takeoff: {info['project_name']}"
+    t_cell.value = _excel_literal(f"Hermes BIM Studio — IFC Quantity Report: {info['project_name']}")
     t_cell.fill = header_fill
     t_cell.font = title_font
     t_cell.alignment = Alignment(vertical="center", horizontal="left", indent=1)
     
-    ws_summary["A3"] = "Grand Total Estimated Cost:"
+    ws_summary["A3"] = "Listed-scope total (4 categories only):"
     ws_summary["A3"].font = card_header_font
-    ws_summary["B3"] = f"${grand_total:,.2f}"
+    ws_summary["B3"] = f"${scope_total:,.2f}" if scope_total is not None else "Not calculated — enter complete rates"
     ws_summary["B3"].font = card_total_font
     
     ws_summary["A4"] = "IFC Model SHA-256:"
@@ -224,7 +418,7 @@ def generate_5d_takeoff(
     ws_summary["B4"].font = subtitle_font
     
     # Table Headers
-    headers = ["WBS Code", "Item Description", "Quantity", "Unit", "Unit Rate ($)", "Subtotal ($)"]
+    headers = ["WBS Code", "Item Description", "Quantity", "Unit", "Unit Rate ($, user supplied)", "Subtotal ($)", "Source / Coverage"]
     for col_idx, h in enumerate(headers, 1):
         cell = ws_summary.cell(row=6, column=col_idx, value=h)
         cell.fill = card_fill
@@ -234,14 +428,22 @@ def generate_5d_takeoff(
     for r_idx, item in enumerate(line_items, 7):
         ws_summary.cell(row=r_idx, column=1, value=item["wbs"]).alignment = Alignment(horizontal="center")
         ws_summary.cell(row=r_idx, column=2, value=item["description"])
-        ws_summary.cell(row=r_idx, column=3, value=item["qty"]).number_format = "#,##0.00"
+        ws_summary.cell(row=r_idx, column=3, value=item["qty"]).number_format = "#,##0.000000"
         ws_summary.cell(row=r_idx, column=4, value=item["unit"]).alignment = Alignment(horizontal="center")
-        ws_summary.cell(row=r_idx, column=5, value=item["rate"]).number_format = "$#,##0.00"
-        ws_summary.cell(row=r_idx, column=6, value=item["total"]).number_format = "$#,##0.00"
+        rate_cell = ws_summary.cell(row=r_idx, column=5, value=item["rate"])
+        rate_cell.number_format = "$#,##0.00"
+        total_cell = ws_summary.cell(row=r_idx, column=6, value=item["total"])
+        total_cell.number_format = "$#,##0.00"
+        coverage = f"{item['measured_elements']}/{item['total_elements']} complete; {item['source']}"
+        if item["unavailable"]:
+            coverage += f"; {len(item['unavailable'])} unavailable"
+        ws_summary.cell(row=r_idx, column=7, value=coverage)
         
     tot_row = len(line_items) + 7
-    ws_summary.cell(row=tot_row, column=2, value="TOTAL ESTIMATED 5D COST").font = Font(name="Segoe UI", size=12, bold=True)
-    tot_cell = ws_summary.cell(row=tot_row, column=6, value=f"=SUM(F7:F{tot_row-1})")
+    ws_summary.cell(row=tot_row, column=2, value="LISTED-SCOPE TOTAL — 4 categories only; user-supplied rates").font = Font(name="Segoe UI", size=12, bold=True)
+    tot_cell = ws_summary.cell(row=tot_row, column=6, value=scope_total)
+    if scope_total is None:
+        ws_summary.cell(row=tot_row, column=2, value="LISTED-SCOPE TOTAL NOT CALCULATED — add complete quantities and user-supplied rates")
     tot_cell.font = card_total_font
     tot_cell.number_format = "$#,##0.00"
     
@@ -257,12 +459,17 @@ def generate_5d_takeoff(
     
     audit_rows = [
         ("File Path", ifc_path),
-        ("File SHA-256", info["sha256"]),
+        ("Source Model SHA-256", info["sha256"]),
         ("IFC Schema", info["schema"]),
+        ("Quantity Basis", "BaseQuantities.NetSideArea / NetVolume; door/window entity counts"),
+        ("Pricing Scope", "; ".join(f"{item['description']} [{item['source']}]" for item in pricing_scope)),
+        ("Pricing", "User-supplied rates only; no default rate assumptions"),
+        ("Quantity Coverage", "; ".join(f"{item['description']}: {item['measured_elements']}/{item['total_elements']}" for item in line_items)),
+        ("Price Total Status", "complete for the four listed categories only" if scope_total is not None else "not calculated; missing rates or quantities; four listed categories only"),
         ("File Size (Bytes)", str(info["file_size_bytes"])),
         ("Engine Version", "Hermes BIM Studio v0.1.0 (ifcopenshell 0.9.0)"),
         ("Generated At", time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())),
-        ("Compliance Findings", str(len(info["findings"])))
+        ("Model Findings", str(len(info["findings"])))
     ]
     
     ws_audit.cell(row=1, column=1, value="Audit Record Parameter").font = card_header_font
@@ -270,19 +477,40 @@ def generate_5d_takeoff(
     
     for r_idx, (k, v) in enumerate(audit_rows, 2):
         ws_audit.cell(row=r_idx, column=1, value=k).font = Font(name="Segoe UI", bold=True)
-        ws_audit.cell(row=r_idx, column=2, value=v).font = Font(name="Segoe UI")
+        ws_audit.cell(row=r_idx, column=2, value=_excel_literal(v)).font = Font(name="Segoe UI")
         
     ws_audit.column_dimensions["A"].width = 25
     ws_audit.column_dimensions["B"].width = 65
+
+    ws_unavailable = wb.create_sheet(title="Unavailable Measurements")
+    unavailable_headers = ["Category", "Element ID", "Quantity Source", "Unavailable Reason"]
+    for col_idx, header in enumerate(unavailable_headers, 1):
+        cell = ws_unavailable.cell(row=1, column=col_idx, value=header)
+        cell.fill = card_fill
+        cell.font = Font(name="Segoe UI", size=11, bold=True, color="FFFFFF")
+    unavailable_row = 2
+    for item in line_items:
+        for record in item["unavailable"]:
+            values = (item["description"], record["element_id"], record["source"], record["reason"])
+            for col_idx, value in enumerate(values, 1):
+                ws_unavailable.cell(row=unavailable_row, column=col_idx, value=_excel_literal(value))
+            unavailable_row += 1
+    if unavailable_row == 2:
+        ws_unavailable.cell(row=2, column=1, value="No unavailable measurements")
+    for column, width in (("A", 30), ("B", 14), ("C", 36), ("D", 60)):
+        ws_unavailable.column_dimensions[column].width = width
     
     wb.save(output_xlsx)
     
     return {
         "project_name": info["project_name"],
-        "grand_total_usd": grand_total,
+        "pricing_scope": pricing_scope,
+        "priced_scope_total_usd": scope_total,
+        "pricing_status": "complete_for_listed_scope" if scope_total is not None else "not_priced_or_incomplete",
         "line_items_count": len(line_items),
+        "line_items": line_items,
         "output_xlsx": output_xlsx,
-        "sha256": info["sha256"]
+        "source_model_sha256": info["sha256"]
     }
 
 def render_3d_viewer(
@@ -350,6 +578,9 @@ def render_3d_viewer(
         base_dir = os.path.dirname(os.path.abspath(ifc_path))
         output_html = os.path.join(base_dir, "bim_viewer_3d.html")
         
+    three_js, orbit_js = _load_vendor_js()
+    project_name_html = html_lib.escape(str(info["project_name"]), quote=True)
+    meshes_data_json = _json_for_inline_script(meshes)
     html_template = f"""<!DOCTYPE html>
 <html lang=\"en\">
 <head>
@@ -360,8 +591,9 @@ def render_3d_viewer(
   body {{ margin: 0; overflow: hidden; background: #13141f; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #c0caf5; }}
   #viewport {{ width: 100vw; height: 100vh; display: block; }}
   #overlay {{ position: absolute; top: 16px; left: 16px; background: rgba(26, 27, 38, 0.92); border: 1px solid #414868; border-radius: 8px; padding: 14px 18px; max-width: 320px; backdrop-filter: blur(10px); box-shadow: 0 4px 20px rgba(0,0,0,0.5); }}
-  h2 {{ margin: 0 0 8px 0; font-size: 15px; color: #7aa2f7; display: flex; align-items: center; justify-content: space-between; }}
-  .badge {{ background: #2ac3de; color: #13141f; font-size: 10px; font-weight: bold; padding: 2px 6px; border-radius: 4px; }}
+  h2 {{ margin: 0 0 8px 0; font-size: 15px; color: #7aa2f7; display: flex; align-items: center; justify-content: space-between; gap: 8px; }}
+  .brand {{ white-space: nowrap; }}
+  .badge {{ flex-shrink: 0; background: #2ac3de; color: #13141f; font-size: 10px; font-weight: bold; padding: 2px 6px; border-radius: 4px; white-space: nowrap; }}
   .stat {{ display: flex; justify-content: space-between; font-size: 12px; margin: 4px 0; }}
   .stat-label {{ color: #7982a9; }}
   .stat-val {{ font-weight: 600; color: #e0af68; }}
@@ -369,13 +601,13 @@ def render_3d_viewer(
   #info-panel h3 {{ margin: 0 0 6px 0; font-size: 13px; color: #9ece6a; }}
   #hint {{ position: absolute; bottom: 16px; left: 16px; font-size: 11px; color: #565f89; background: rgba(26, 27, 38, 0.6); padding: 6px 10px; border-radius: 4px; }}
 </style>
-<script src=\"https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js\"></script>
-<script src=\"https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js\"></script>
+<script>{three_js}</script>
+<script>{orbit_js}</script>
 </head>
 <body>
 <div id=\"overlay\">
-  <h2>Hermes BIM Studio <span class=\"badge\">IFC 3D</span></h2>
-  <div class=\"stat"><span class=\"stat-label\">Project:</span> <span class=\"stat-val\">{info['project_name']}</span></div>
+  <h2><span class=\"brand\">Hermes BIM Studio</span><span class=\"badge\">IFC 3D</span></h2>
+  <div class=\"stat\"><span class=\"stat-label\">Project:</span> <span class=\"stat-val\">{project_name_html}</span></div>
   <div class=\"stat"><span class=\"stat-label\">Walls / Slabs:</span> <span class=\"stat-val\">{len(walls)} / {len(slabs)}</span></div>
   <div class=\"stat"><span class=\"stat-label\">Doors / Windows:</span> <span class=\"stat-val\">{len(doors)} / {len(windows)}</span></div>
   <div class=\"stat"><span class=\"stat-label\">Rendered Meshes:</span> <span class=\"stat-val\">{len(meshes)}</span></div>
@@ -391,7 +623,7 @@ def render_3d_viewer(
 <div id=\"viewport\"></div>
 
 <script>
-  const meshesData = {json.dumps(meshes)};
+  const meshesData = {meshes_data_json};
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x13141f);
   
