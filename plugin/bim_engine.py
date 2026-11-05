@@ -14,6 +14,8 @@ import ifcopenshell.util.unit as ifc_unit_util
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
+MAX_RENDER_ELEMENTS = 150
+
 def compute_sha256(path: str) -> str:
     hasher = hashlib.sha256()
     with open(path, "rb") as f:
@@ -269,7 +271,7 @@ def generate_5d_takeoff(
     def measured_line_item(elements, qto_name, quantity_name, quantity_class, description, unit, rate_key):
         if not elements:
             # An empty IFC category has an explicitly known zero quantity, not missing data.
-            # Still surface the supplied/validated rate for audit even though 0 * rate == 0.
+            # Still require and surface the supplied rate so listed-scope pricing is complete.
             rate = _validated_rate(rates, rate_key)
             return {
                 "description": description,
@@ -281,7 +283,7 @@ def generate_5d_takeoff(
                 "complete": True,
                 "unavailable": [],
                 "rate": rate,
-                "total": 0.0,
+                "total": 0.0 if rate is not None else None,
             }
         values = []
         failures = []
@@ -518,6 +520,8 @@ def render_3d_viewer(
     output_html: Optional[str] = None,
     max_elements: int = 150
 ) -> Dict[str, Any]:
+    if type(max_elements) is not int or not 0 <= max_elements <= MAX_RENDER_ELEMENTS:
+        raise ValueError(f"max_elements must be between 0 and {MAX_RENDER_ELEMENTS}")
     if not os.path.exists(ifc_path):
         raise FileNotFoundError(f"IFC file not found: {ifc_path}")
         
