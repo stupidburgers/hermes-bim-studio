@@ -15,6 +15,7 @@ category: engineering
 repo: https://github.com/stupidburgers/hermes-bim-studio
 ref: main
 sha: af3b309bb80f7f9b009976c41f610b53c64bf4b9
+subdir: plugin
 
 requires_hermes: ">=0.22.0"
 
