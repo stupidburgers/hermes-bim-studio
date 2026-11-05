@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+docs/evidence/*.xlsx
+docs/evidence/*.html
+spikes/viewer_preview.html
