@@ -14,7 +14,7 @@ category: engineering
 
 repo: https://github.com/stupidburgers/hermes-bim-studio
 ref: main
-# sha: will be pinned to exact 40-character commit SHA upon GitHub push
+sha: e8d97c8c81db288ec0545ca1e0f778d096d637a6
 
 requires_hermes: ">=0.22.0"
 
