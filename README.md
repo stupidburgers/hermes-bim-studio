@@ -1,5 +1,7 @@
 # Hermes BIM Studio (ConstructIQ)
 
+[![CI](https://github.com/stupidburgers/hermes-bim-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/stupidburgers/hermes-bim-studio/actions/workflows/ci.yml)
+
 **The premier BIM, 3D Building Inspection, and 5D Quantity Takeoff Plugin for Hermes Agent.**
 
 Built for the **Hermes Agent Plugin Hackathon** (Nous Research, Nov 2026, $20,000 cash prizes).
