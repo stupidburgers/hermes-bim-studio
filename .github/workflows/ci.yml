@@ -31,5 +31,7 @@ jobs:
         pip install ifcopenshell openpyxl
 
     - name: Run Test Suite
+      env:
+        PYTHONUTF8: "1"
       run: |
         python tests/test_plugin.py

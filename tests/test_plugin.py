@@ -27,7 +27,7 @@ class TestHermesBimStudioPlugin(unittest.TestCase):
         self.assertGreater(data["inventory"]["walls"], 0)
         self.assertGreater(data["inventory"]["slabs"], 0)
         self.assertEqual(len(data["sha256"]), 64)
-        print(f"✓ test_01_bim_inspect passed with {data['schema']} model ({data['inventory']['walls']} walls, {data['inventory']['slabs']} slabs)")
+        print(f"[PASS] test_01_bim_inspect passed with {data['schema']} model ({data['inventory']['walls']} walls, {data['inventory']['slabs']} slabs)")
 
     def test_02_bim_takeoff(self):
         xlsx_path = os.path.join(TEST_OUTPUT_DIR, "test_takeoff.xlsx")
@@ -40,7 +40,7 @@ class TestHermesBimStudioPlugin(unittest.TestCase):
         self.assertGreater(data["grand_total_usd"], 0)
         self.assertTrue(os.path.exists(xlsx_path))
         self.assertGreater(os.path.getsize(xlsx_path), 5000)
-        print(f"✓ test_02_bim_takeoff passed (Total: ${data['grand_total_usd']:,.2f}, File size: {os.path.getsize(xlsx_path)} bytes)")
+        print(f"[PASS] test_02_bim_takeoff passed (Total: ${data['grand_total_usd']:,.2f}, File size: {os.path.getsize(xlsx_path)} bytes)")
 
     def test_03_bim_render_view(self):
         html_path = os.path.join(TEST_OUTPUT_DIR, "test_viewer.html")
@@ -54,7 +54,7 @@ class TestHermesBimStudioPlugin(unittest.TestCase):
         self.assertTrue(os.path.exists(html_path))
         self.assertGreater(data["rendered_meshes"], 10)
         self.assertIn("::preview{", data["preview_directive"])
-        print(f"✓ test_03_bim_render_view passed ({data['rendered_meshes']} meshes rendered, HTML size: {os.path.getsize(html_path)} bytes)")
+        print(f"[PASS] test_03_bim_render_view passed ({data['rendered_meshes']} meshes rendered, HTML size: {os.path.getsize(html_path)} bytes)")
 
 if __name__ == '__main__':
     unittest.main()
