@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict
 
-from .bim_engine import inspect_bim_model, generate_5d_takeoff, render_3d_viewer
+from .bim_engine import MAX_RENDER_ELEMENTS, inspect_bim_model, generate_5d_takeoff, render_3d_viewer
 
 
 def handle_bim_inspect(args: Dict[str, Any], **kwargs: Any) -> str:
@@ -36,7 +36,7 @@ def handle_bim_render_view(args: Dict[str, Any], **kwargs: Any) -> str:
     if not ifc_path:
         return "Error: 'ifc_path' parameter is required."
     output_html = args.get("output_html")
-    max_elements = int(args.get("max_elements", 150))
+    max_elements = args.get("max_elements", MAX_RENDER_ELEMENTS)
     try:
         result = render_3d_viewer(ifc_path, output_html=output_html, max_elements=max_elements)
         return json.dumps(result, indent=2)
@@ -114,7 +114,9 @@ BIM_RENDER_VIEW_SCHEMA = {
             },
             "max_elements": {
                 "type": "integer",
-                "description": "Max number of 3D mesh elements to render for fast real-time interaction (default: 150).",
+                "description": f"Max number of 3D mesh elements to render (0 to {MAX_RENDER_ELEMENTS}; default: {MAX_RENDER_ELEMENTS}).",
+                "minimum": 0,
+                "maximum": MAX_RENDER_ELEMENTS,
             },
         },
         "required": ["ifc_path"],

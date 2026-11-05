@@ -42,6 +42,27 @@ class TestTakeoffMeasurements(unittest.TestCase):
                 self.assertEqual(items[wbs]["rate"], 1.0)
             self.assertEqual(data["priced_scope_total_usd"], 16.0)
 
+    def test_empty_category_without_rate_withholds_listed_scope_total(self):
+        with tempfile.TemporaryDirectory(dir=OUTPUT_DIR) as temp_dir:
+            source = ifcopenshell.open(IFC_PATH)
+            for element in list(source.by_type("IfcWall")) + list(source.by_type("IfcSlab")):
+                ifcopenshell.api.run("root.remove_product", source, product=element)
+            modified_path = os.path.join(temp_dir, "no-walls-or-slabs.ifc")
+            source.write(modified_path)
+
+            raw = handle_bim_takeoff({
+                "ifc_path": modified_path,
+                "output_xlsx": os.path.join(temp_dir, "takeoff.xlsx"),
+                "rates": {"concrete_slab_m3": 1, "door_unit": 1, "window_unit": 1},
+            })
+            data = json.loads(raw)
+            wall_item = next(item for item in data["line_items"] if item["wbs"] == "02.01")
+
+            self.assertTrue(wall_item["complete"])
+            self.assertIsNone(wall_item["rate"])
+            self.assertIsNone(wall_item["total"])
+            self.assertIsNone(data["priced_scope_total_usd"])
+
     def test_line_items_are_ordered_by_ascending_wbs_code(self):
         with tempfile.TemporaryDirectory(dir=OUTPUT_DIR) as temp_dir:
             raw = handle_bim_takeoff({
