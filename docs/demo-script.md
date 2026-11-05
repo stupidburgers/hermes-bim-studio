@@ -1,36 +1,43 @@
-# 85-Second Demo Video Script for Twitter/X
+# 80-Second Demo Script — Hermes BIM Studio
 
-**Target:** <= 90 seconds (Per Nous Research rules: "Keep the demo under 90 seconds and show the plugin working").
-**Format:** Screen recording of Hermes Desktop with voiceover or upbeat tech music + callout captions.
+**Target:** 80–85 seconds (keep the published cut under 90 seconds).
+**Demo data:** `samples/sample_house.ifc` (IFC4, project `Projekt-FZK-Haus`).
+**Pricing disclaimer:** rates in this demo are illustrative inputs, not market prices or a construction quote.
 
----
+## 0:00–0:12 — The problem
 
-### Scene 1: The Pitch (0:00 - 0:12)
-- **Screen:** Hermes Desktop in clean dark mode.
-- **Caption / Voiceover:** *"What if your AI agent wasn't just a chatbot, but a full-stack BIM Engineer? Meet Hermes BIM Studio."*
-- **Action:** User drags and drops `residential_128m2.ifc` into the chat with the prompt:  
-  `Hermes, inspect this building model, run a deterministic 5D quantity takeoff, and render the interactive 3D model.`
+- **Screen:** Hermes Desktop with `sample_house.ifc` ready.
+- **Voiceover:** “An agent shouldn’t make up building quantities from a drawing it can’t reliably measure. This plugin reads the IFC’s own quantity records and shows what is—and isn’t—covered.”
+- **Prompt:** “Inspect this IFC model, report wall and slab quantities with source and coverage, create a quantity workbook using these illustrative USD rates, then open the model in 3D.”
 
-### Scene 2: Semantic BIM Ingestion & Compliance (0:12 - 0:32)
-- **Screen:** Hermes invokes `bim_inspect`.
-- **Output card appears:**
-  - Project: `Residencial Sample (128.22 m²)`
-  - Architecture: 109 walls, 88 slabs, 22 doors, 10 windows, 24 roof sections.
-  - Compliance Engine: 8 uncontained spatial elements detected and flagged.
-- **Caption:** *"Instant boundary-representation parsing using ifcopenshell — zero hallucinations, 100% deterministic spatial audit."*
+## 0:12–0:28 — Inspect the actual model
 
-### Scene 3: Deterministic 5D Takeoff & Excel Audit Trail (0:32 - 0:52)
-- **Screen:** Hermes invokes `bim_takeoff`.
-- **Action:** An executive 5D takeoff card appears showing Grand Total: `$117,119.50`.
-- **Action:** Clicks to preview or open the generated `takeoff_5d.xlsx`. Shows the formatted Excel workbook with WBS codes, concrete volumes ($m^3$), masonry surface area ($m^2$), unit rates, and the cryptographic SHA-256 model provenance tab.
-- **Caption:** *"Generates an auditable 5D construction budget with SHA-256 model fingerprinting in seconds."*
+- **Screen:** `bim_inspect` result for the bundled fixture.
+- **Show:** IFC4 schema, project name, and element counts from the live output.
+- **Voiceover:** “Hermes parses the actual IFC locally. These are model contents, not guessed from text.”
 
-### Scene 4: Live 3D WebGL Building Inspection (0:52 - 1:18)
-- **Screen:** Hermes invokes `bim_render_view` returning `::preview{file="viewer.html"}`.
-- **Action:** The Hermes Desktop preview pane slides open with the full 3D interactive building model!
-- **Action:** Cursor smoothly orbits around the house in 3D, zooms into the patio slab, clicks a structural wall — element inspector pops up showing ID `#2589`, Type `IfcWall`, dimensions, and highlights it in radiant orange.
-- **Caption:** *"Full Three.js WebGL orbit controls, element inspection, and storey isolation right inside Hermes Desktop."*
+## 0:28–0:49 — Quantity report with explicit provenance
 
-### Scene 5: Call to Action & Catalog Listing (1:18 - 1:25)
-- **Screen:** Quick flash of the open PR on NousResearch/hermes-agent and GitHub repo `stupidburgers/hermes-bim-studio`.
-- **Caption / Voiceover:** *"Hermes BIM Studio: Bringing AEC engineering to open-source autonomous agents. Install via Hermes Marketplace today. Built for the Nous Research Plugin Hackathon."*
+- **Screen:** `bim_takeoff` result and workbook. Pass rates: wall `70 USD/m²`, slab `480 USD/m³`, door `250 USD/unit`, window `320 USD/unit`.
+- **Show:** wall `BaseQuantities.NetSideArea` = `190.465524 m²`; slab `BaseQuantities.NetVolume` = `76.991590 m³`; door/window entity counts; source and coverage columns.
+- **Show:** illustrative listed-scope total `$55,058.55` for walls, slabs, doors, and windows only, labelled as arithmetic on the caller’s sample rates—not a whole-project estimate, bid, certified takeoff, or market estimate.
+- **Voiceover:** “The source field tells you exactly which IFC quantity was used. If any element lacks a usable quantity, coverage drops and the plugin withholds the affected line total and listed-scope total instead of filling the gap with a guess.”
+
+## 0:49–1:12 — Inspect the model in 3D
+
+- **Screen:** `bim_render_view` result and Hermes Desktop preview.
+- **Action:** orbit and zoom the model, click a visible element.
+- **Show:** displayed element identity/type. Do not promise dimensions, storey isolation, clash detection, or code-compliance findings.
+- **Voiceover:** “The viewer is self-contained: it works without loading Three.js from a CDN.”
+
+## 1:12–1:20 — Close
+
+- **Screen:** brief plugin repo / catalog PR shot, only after the PR is actually open.
+- **Voiceover:** “Hermes BIM Studio: transparent IFC quantities and an interactive model viewer, inside Hermes.”
+
+## Recording gates
+
+- Re-run the current tests and capture actual tool output; do not fabricate cards or replace missing values in editing.
+- Show the explicit rate inputs and label them illustrative.
+- Keep the final export under 90 seconds. Do not say “bid-ready”, “certified”, “exact”, “code compliant”, or “zero hallucinations”.
+- Do not imply catalog admission, Marketplace availability, or hackathon submission until each has actually occurred.

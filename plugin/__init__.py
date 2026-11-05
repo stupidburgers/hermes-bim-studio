@@ -1,4 +1,4 @@
-"""Hermes BIM Studio — AI-powered Building Information Modeling (BIM) & 5D Cost Takeoff."""
+"""Hermes BIM Studio — IFC model inspection and listed-scope quantity reporting."""
 from __future__ import annotations
 
 import json
@@ -48,9 +48,9 @@ BIM_INSPECT_SCHEMA = {
     "name": "bim_inspect",
     "description": (
         "Inspect an IFC (Industry Foundation Classes) Building Information Model. "
-        "Extracts project metadata, building storeys, spaces, architectural and "
-        "structural element counts (walls, slabs, doors, windows, columns, beams, roofs), "
-        "and runs deterministic compliance checks (spatial containment, uncontained elements)."
+        "Extracts project metadata, storeys, spaces, and architectural/structural element counts. "
+        "Runs basic model-quality checks for spatial containment and unnamed elements; "
+        "these checks are not building-code or regulatory compliance certification."
     ),
     "parameters": {
         "type": "object",
@@ -67,11 +67,12 @@ BIM_INSPECT_SCHEMA = {
 BIM_TAKEOFF_SCHEMA = {
     "name": "bim_takeoff",
     "description": (
-        "Generate a deterministic 5D Quantity Takeoff (QTO) and construction cost "
-        "estimate from an IFC model. Calculates physical quantities (wall areas m², "
-        "concrete volumes m³, element counts), applies unit rates, and produces a "
-        "professionally styled Excel spreadsheet (.xlsx) with an immutable cryptographic "
-        "audit trail."
+        "Create an IFC quantity report from IFC BaseQuantities: NetSideArea for walls and "
+        "NetVolume for slabs, converted using the IFC quantity/project unit. Reports per-element "
+        "coverage and missing quantities rather than guessing. Door/window values are IFC entity "
+        "counts. Optional caller-supplied USD rates produce a total for these four listed categories "
+        "only when every item has complete quantities and a supplied rate; this is not a whole-project "
+        "estimate, professional bid, or quantity-surveying certification."
     ),
     "parameters": {
         "type": "object",
@@ -82,7 +83,7 @@ BIM_TAKEOFF_SCHEMA = {
             },
             "rates": {
                 "type": "object",
-                "description": "Optional custom unit rates (e.g. {'concrete_slab_m3': 450.0, 'masonry_wall_m2': 70.0}).",
+                "description": "Optional caller-supplied USD unit rates: masonry_wall_m2, concrete_slab_m3, door_unit, window_unit. A total covers only these four listed categories, not the whole project. Missing rates leave the corresponding total blank; no default prices are applied.",
             },
             "output_xlsx": {
                 "type": "string",
@@ -96,11 +97,9 @@ BIM_TAKEOFF_SCHEMA = {
 BIM_RENDER_VIEW_SCHEMA = {
     "name": "bim_render_view",
     "description": (
-        "Generate an interactive 3D WebGL Building Information Model viewer "
-        "from an IFC file. Produces a self-contained HTML page using Three.js with "
-        "orbit controls, directional lighting, storey isolation, and element click inspection. "
-        "Returns the preview directive ::preview{file=\"path.html\"} to display the 3D model "
-        "directly in the Hermes Desktop preview pane."
+        "Generate a self-contained interactive WebGL 3D view of selected IFC elements "
+        "using vendored Three.js assets (no network request). Supports orbit/zoom and "
+        "click-to-inspect element identity."
     ),
     "parameters": {
         "type": "object",

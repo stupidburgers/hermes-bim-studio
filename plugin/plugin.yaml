@@ -6,8 +6,9 @@ author: stupidburgers
 license: MIT
 homepage: https://github.com/stupidburgers/hermes-bim-studio
 description: >
-  Building Information Modeling (BIM) inspection, 5D quantity takeoff engine,
-  and embedded 3D WebGL building model viewer for construction engineering.
+  Local IFC model inspection, wall and slab BaseQuantities reporting, optional
+  caller-priced totals for four listed categories only, and an embedded
+  interactive 3D viewer. Not a whole-project estimate or compliance certification.
 requires_hermes: ">=0.22.0"
 python_dependencies:
   - "ifcopenshell>=0.9.0,<0.10"

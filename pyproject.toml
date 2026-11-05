@@ -1,18 +1,25 @@
 [project]
 name = "hermes-bim-studio"
 version = "0.1.0"
-description = "Building Information Modeling (BIM) inspection, 5D quantity takeoff engine, and interactive 3D WebGL viewer for Hermes Agent"
+description = "Local IFC inspection, transparent quantity reporting, scoped caller-priced arithmetic, and an interactive viewer for Hermes Agent"
 authors = [
   { name = "stupidburgers" }
 ]
-license = { text = "MIT" }
+license = "MIT"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-  "ifcopenshell>=0.9.0",
-  "openpyxl>=3.1.2"
+  "ifcopenshell>=0.9.0,<0.10",
+  "openpyxl>=3.1.2,<4"
 ]
 
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["plugin*"]
+exclude = ["plugin.tests*"]
+
+[tool.setuptools.package-data]
+plugin = ["plugin.yaml", "vendor/*.js", "vendor/*.md"]
