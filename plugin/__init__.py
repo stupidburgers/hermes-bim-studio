@@ -24,8 +24,9 @@ def handle_bim_takeoff(args: Dict[str, Any], **kwargs: Any) -> str:
         return "Error: 'ifc_path' parameter is required."
     rates = args.get("rates")
     output_xlsx = args.get("output_xlsx")
+    overwrite = bool(args.get("overwrite", False))
     try:
-        result = generate_5d_takeoff(ifc_path, rates=rates, output_xlsx=output_xlsx)
+        result = generate_5d_takeoff(ifc_path, rates=rates, output_xlsx=output_xlsx, overwrite=overwrite)
         return json.dumps(result, indent=2)
     except Exception as exc:
         return f"Error generating 5D takeoff: {exc}"
@@ -37,8 +38,9 @@ def handle_bim_render_view(args: Dict[str, Any], **kwargs: Any) -> str:
         return "Error: 'ifc_path' parameter is required."
     output_html = args.get("output_html")
     max_elements = args.get("max_elements", MAX_RENDER_ELEMENTS)
+    overwrite = bool(args.get("overwrite", False))
     try:
-        result = render_3d_viewer(ifc_path, output_html=output_html, max_elements=max_elements)
+        result = render_3d_viewer(ifc_path, output_html=output_html, max_elements=max_elements, overwrite=overwrite)
         return json.dumps(result, indent=2)
     except Exception as exc:
         return f"Error generating 3D view: {exc}"
@@ -87,7 +89,11 @@ BIM_TAKEOFF_SCHEMA = {
             },
             "output_xlsx": {
                 "type": "string",
-                "description": "Optional path to save the generated .xlsx workbook.",
+                "description": "A workbook is ALWAYS written. Give a bare file name ending in .xlsx (no directories, no '..', no absolute paths); it is saved under <HERMES_HOME>/plugin-data/hermes-bim-studio/. If omitted, a default name is used. An existing file is never silently overwritten: a timestamp is added, or set overwrite=true to replace it. The final absolute path is returned.",
+            },
+            "overwrite": {
+                "type": "boolean",
+                "description": "Allow replacing an existing file at the chosen name. Default false; without it a timestamped variant is written instead of overwriting.",
             },
         },
         "required": ["ifc_path"],
@@ -110,7 +116,11 @@ BIM_RENDER_VIEW_SCHEMA = {
             },
             "output_html": {
                 "type": "string",
-                "description": "Optional path to save the generated viewer HTML file.",
+                "description": "A viewer HTML file is ALWAYS written. Give a bare file name ending in .html (no directories, no '..', no absolute paths); it is saved under <HERMES_HOME>/plugin-data/hermes-bim-studio/. If omitted, a default name is used. An existing file is never silently overwritten: a timestamp is added, or set overwrite=true to replace it. The final absolute path is returned.",
+            },
+            "overwrite": {
+                "type": "boolean",
+                "description": "Allow replacing an existing file at the chosen name. Default false; without it a timestamped variant is written instead of overwriting.",
             },
             "max_elements": {
                 "type": "integer",

@@ -21,16 +21,15 @@ class TestViewerEscaping(unittest.TestCase):
             source.by_type("IfcProject")[0].Name = payload
             source.by_type("IfcWall")[0].Name = payload
             modified_path = os.path.join(temp_dir, "unsafe-name.ifc")
-            output_path = os.path.join(temp_dir, "viewer.html")
             source.write(modified_path)
 
             response = json.loads(handle_bim_render_view({
                 "ifc_path": modified_path,
-                "output_html": output_path,
+                "output_html": "viewer.html",
                 "max_elements": 10,
             }))
             self.assertTrue(os.path.exists(response["output_html"]))
-            with open(output_path, encoding="utf-8") as viewer_file:
+            with open(response["output_html"], encoding="utf-8") as viewer_file:
                 html = viewer_file.read()
 
             self.assertNotIn(payload, html)

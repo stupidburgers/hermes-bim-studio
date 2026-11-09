@@ -26,7 +26,7 @@ class TestTakeoffMeasurements(unittest.TestCase):
 
             raw = handle_bim_takeoff({
                 "ifc_path": modified_path,
-                "output_xlsx": os.path.join(temp_dir, "takeoff.xlsx"),
+                "output_xlsx": "takeoff.xlsx",
                 "rates": RATES,
             })
             data = json.loads(raw)
@@ -52,7 +52,7 @@ class TestTakeoffMeasurements(unittest.TestCase):
 
             raw = handle_bim_takeoff({
                 "ifc_path": modified_path,
-                "output_xlsx": os.path.join(temp_dir, "takeoff.xlsx"),
+                "output_xlsx": "takeoff.xlsx",
                 "rates": {"concrete_slab_m3": 1, "door_unit": 1, "window_unit": 1},
             })
             data = json.loads(raw)
@@ -67,7 +67,7 @@ class TestTakeoffMeasurements(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=OUTPUT_DIR) as temp_dir:
             raw = handle_bim_takeoff({
                 "ifc_path": IFC_PATH,
-                "output_xlsx": os.path.join(temp_dir, "ordering.xlsx"),
+                "output_xlsx": "ordering.xlsx",
                 "rates": RATES,
             })
             data = json.loads(raw)
@@ -86,13 +86,13 @@ class TestTakeoffMeasurements(unittest.TestCase):
             modified_path = os.path.join(temp_dir, "missing-wall-qto.ifc")
             source.write(modified_path)
 
-            xlsx_path = os.path.join(temp_dir, "takeoff.xlsx")
             raw = handle_bim_takeoff({
                 "ifc_path": modified_path,
-                "output_xlsx": xlsx_path,
+                "output_xlsx": "takeoff.xlsx",
                 "rates": RATES,
             })
             data = json.loads(raw)
+            xlsx_path = data["output_xlsx"]  # final confined path returned by the tool
             wall_item = next(item for item in data["line_items"] if item["wbs"] == "02.01")
             self.assertEqual((wall_item["measured_elements"], wall_item["total_elements"]), (12, 13))
             self.assertFalse(wall_item["complete"])
@@ -115,7 +115,7 @@ class TestTakeoffMeasurements(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=OUTPUT_DIR) as temp_dir:
             raw = handle_bim_takeoff({
                 "ifc_path": IFC_PATH,
-                "output_xlsx": os.path.join(temp_dir, "unpriced.xlsx"),
+                "output_xlsx": "unpriced.xlsx",
             })
             data = json.loads(raw)
             self.assertIsNone(data["priced_scope_total_usd"])
@@ -140,7 +140,7 @@ class TestTakeoffMeasurements(unittest.TestCase):
 
             raw = handle_bim_takeoff({
                 "ifc_path": modified_path,
-                "output_xlsx": os.path.join(temp_dir, "takeoff.xlsx"),
+                "output_xlsx": "takeoff.xlsx",
             })
             data = json.loads(raw)
             wall_item = next(item for item in data["line_items"] if item["wbs"] == "02.01")
@@ -163,7 +163,7 @@ class TestTakeoffMeasurements(unittest.TestCase):
 
             raw = handle_bim_takeoff({
                 "ifc_path": modified_path,
-                "output_xlsx": os.path.join(temp_dir, "takeoff.xlsx"),
+                "output_xlsx": "takeoff.xlsx",
                 "rates": RATES,
             })
             data = json.loads(raw)

@@ -5,6 +5,7 @@ import math
 import time
 import hashlib
 import html as html_lib
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import ifcopenshell
@@ -15,6 +16,87 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
 MAX_RENDER_ELEMENTS = 150
+
+# --- Confined output paths (catalog review PR #149221, teknium1) ------------
+# Every generated file is confined to this subdirectory of the active Hermes
+# home. Model-supplied output names are treated as BARE FILE NAMES only; they
+# can never escape this directory. This mirrors the documented plugin data dir
+# `<HERMES_HOME>/plugin-data/<name>/` (see plugin_data_dir()).
+_OUTPUT_SUBDIR = os.path.join("plugin-data", "hermes-bim-studio")
+
+
+def _resolve_hermes_home() -> str:
+    """Return the absolute active HERMES_HOME used for confined output files.
+
+    Resolution order:
+      1. The documented ``HERMES_HOME`` environment variable (Configuration
+         docs resolve ``Path(os.environ["HERMES_HOME"])``). Hermes sets this
+         per-process to the active profile home, and it keeps standalone runs
+         (tests, `hermes plugins doctor`) deterministic.
+      2. ``get_hermes_home()`` from ``hermes_constants`` -- the exact helper the
+         catalog reviewer named. It is a real, import-safe, stdlib-only symbol
+         in Hermes core (hermes_constants.py), but it is a CORE INTERNAL, not a
+         documented plugin-SDK import. It is therefore used only behind a
+         guarded lazy import, never a hard import, so this module stays
+         importable when Hermes is not installed.
+      3. The documented default home, ``~/.hermes``.
+    """
+    env_home = os.environ.get("HERMES_HOME")
+    if env_home:
+        return os.path.abspath(os.path.expanduser(env_home))
+    try:
+        from hermes_constants import get_hermes_home  # core internal; guarded
+        return os.path.abspath(os.path.expanduser(str(get_hermes_home())))
+    except Exception:
+        pass
+    return os.path.abspath(os.path.expanduser("~/.hermes"))
+
+
+def _guard_output_path(name: Optional[str], suffix: str, overwrite: bool = False) -> str:
+    """Validate a model-supplied output name and resolve it to a confined path.
+
+    ``name`` is treated as a BARE FILE NAME only. Absolute paths, drive letters,
+    path separators and ``..`` are rejected before anything is written. The
+    required ``.html``/``.xlsx`` suffix is enforced. The final path is always
+    under ``<HERMES_HOME>/plugin-data/hermes-bim-studio/``. Existing files are
+    never silently replaced: without ``overwrite=True`` a timestamped variant
+    is used instead. Returns the final absolute path.
+    """
+    if not name:
+        name = "bim_viewer_3d.html" if suffix == ".html" else "bim_takeoff_5d.xlsx"
+    if not isinstance(name, str):
+        raise ValueError("output name must be a string")
+    if name in ("", ".", ".."):
+        raise ValueError("output name must be a bare file name")
+    if "/" in name or "\\" in name or os.sep in name or (os.altsep and os.altsep in name):
+        raise ValueError("output name must be a bare file name: path separators are not allowed")
+    if ".." in name:
+        raise ValueError("output name must be a bare file name: '..' is not allowed")
+    if os.path.isabs(name) or (len(name) >= 2 and name[0].isalpha() and name[1] == ":"):
+        raise ValueError("output name must be a bare file name: absolute paths / drive letters are not allowed")
+    if any(ord(ch) < 32 for ch in name) or "\x00" in name:
+        raise ValueError("output name contains control characters")
+    if not name.lower().endswith(suffix):
+        raise ValueError(f"output name must end with {suffix!r}")
+
+    root = os.path.abspath(os.path.join(_resolve_hermes_home(), _OUTPUT_SUBDIR))
+    final = os.path.abspath(os.path.join(root, name))
+    # Defense in depth: even after validation the resolved path stays inside root.
+    if os.path.commonpath([final, root]) != root:
+        raise ValueError("resolved output path escapes the plugin data directory")
+    os.makedirs(root, exist_ok=True)
+    if os.path.islink(final):
+        raise ValueError("refusing to write to a symbolic link")
+    if os.path.exists(final) and not overwrite:
+        stem, ext = os.path.splitext(name)
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        candidate = os.path.join(root, f"{stem}-{stamp}{ext}")
+        n = 1
+        while os.path.exists(candidate) or os.path.islink(candidate):
+            candidate = os.path.join(root, f"{stem}-{stamp}-{n}{ext}")
+            n += 1
+        final = candidate
+    return final
 
 def compute_sha256(path: str) -> str:
     hasher = hashlib.sha256()
@@ -255,10 +337,14 @@ def _line_total(quantity, rates, key):
 def generate_5d_takeoff(
     ifc_path: str,
     rates: Optional[Dict[str, float]] = None,
-    output_xlsx: Optional[str] = None
+    output_xlsx: Optional[str] = None,
+    overwrite: bool = False
 ) -> Dict[str, Any]:
     if not os.path.exists(ifc_path):
         raise FileNotFoundError(f"IFC file not found: {ifc_path}")
+    # Resolve the (model-supplied) output name to a confined path BEFORE any
+    # work or write. A workbook is always written (see the tool schema).
+    final_xlsx = _guard_output_path(output_xlsx, ".xlsx", overwrite=overwrite)
         
     info = inspect_bim_model(ifc_path)
     f = ifcopenshell.open(ifc_path)
@@ -379,10 +465,6 @@ def generate_5d_takeoff(
     total_is_complete = all(item["complete"] and item["total"] is not None for item in line_items)
     scope_total = round(sum(item["total"] for item in line_items), 2) if total_is_complete else None
     
-    if not output_xlsx:
-        base_dir = os.path.dirname(os.path.abspath(ifc_path))
-        output_xlsx = os.path.join(base_dir, "bim_takeoff_5d.xlsx")
-        
     # Build professionally styled Excel workbook
     wb = openpyxl.Workbook()
     
@@ -502,7 +584,7 @@ def generate_5d_takeoff(
     for column, width in (("A", 30), ("B", 14), ("C", 36), ("D", 60)):
         ws_unavailable.column_dimensions[column].width = width
     
-    wb.save(output_xlsx)
+    wb.save(final_xlsx)
     
     return {
         "project_name": info["project_name"],
@@ -511,19 +593,23 @@ def generate_5d_takeoff(
         "pricing_status": "complete_for_listed_scope" if scope_total is not None else "not_priced_or_incomplete",
         "line_items_count": len(line_items),
         "line_items": line_items,
-        "output_xlsx": output_xlsx,
+        "output_xlsx": final_xlsx,
         "source_model_sha256": info["sha256"]
     }
 
 def render_3d_viewer(
     ifc_path: str,
     output_html: Optional[str] = None,
-    max_elements: int = 150
+    max_elements: int = 150,
+    overwrite: bool = False
 ) -> Dict[str, Any]:
     if type(max_elements) is not int or not 0 <= max_elements <= MAX_RENDER_ELEMENTS:
         raise ValueError(f"max_elements must be between 0 and {MAX_RENDER_ELEMENTS}")
     if not os.path.exists(ifc_path):
         raise FileNotFoundError(f"IFC file not found: {ifc_path}")
+    # Resolve the (model-supplied) output name to a confined path BEFORE any
+    # work or write. A viewer HTML file is always written (see the tool schema).
+    final_html = _guard_output_path(output_html, ".html", overwrite=overwrite)
         
     info = inspect_bim_model(ifc_path)
     f = ifcopenshell.open(ifc_path)
@@ -578,10 +664,6 @@ def render_3d_viewer(
         except Exception:
             continue
             
-    if not output_html:
-        base_dir = os.path.dirname(os.path.abspath(ifc_path))
-        output_html = os.path.join(base_dir, "bim_viewer_3d.html")
-        
     three_js, orbit_js = _load_vendor_js()
     project_name_html = html_lib.escape(str(info["project_name"]), quote=True)
     meshes_data_json = _json_for_inline_script(meshes)
@@ -732,11 +814,11 @@ def render_3d_viewer(
 </body>
 </html>"""
     
-    with open(output_html, "w", encoding="utf-8") as out:
+    with open(final_html, "w", encoding="utf-8") as out:
         out.write(html_template)
         
     return {
-        "output_html": output_html,
+        "output_html": final_html,
         "rendered_meshes": len(meshes),
-        "preview_directive": f"::preview{{file=\"{output_html}\"}}"
+        "preview_directive": f"::preview{{file=\"{final_html}\"}}"
     }

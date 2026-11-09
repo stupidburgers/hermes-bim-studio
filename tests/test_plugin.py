@@ -32,10 +32,9 @@ class TestHermesBimStudioPlugin(unittest.TestCase):
         print(f"[PASS] test_01_bim_inspect passed with {data['schema']} model ({data['inventory']['walls']} walls, {data['inventory']['slabs']} slabs)")
 
     def test_02_bim_takeoff(self):
-        xlsx_path = os.path.join(TEST_OUTPUT_DIR, "test_takeoff.xlsx")
         raw_res = handle_bim_takeoff({
             "ifc_path": IFC_SAMPLE_PATH,
-            "output_xlsx": xlsx_path,
+            "output_xlsx": "test_takeoff.xlsx",
             "rates": {
                 "masonry_wall_m2": 1.0,
                 "concrete_slab_m3": 2.0,
@@ -45,6 +44,7 @@ class TestHermesBimStudioPlugin(unittest.TestCase):
         })
         self.assertFalse(raw_res.startswith("Error"), f"Takeoff failed: {raw_res}")
         data = json.loads(raw_res)
+        xlsx_path = data["output_xlsx"]  # final confined path returned by the tool
         quantities = {item["wbs"]: item["qty"] for item in data["line_items"]}
         self.assertAlmostEqual(quantities["02.01"], 190.465524, places=6)
         self.assertAlmostEqual(quantities["01.01"], 76.99159, places=5)
@@ -62,14 +62,14 @@ class TestHermesBimStudioPlugin(unittest.TestCase):
         print(f"[PASS] test_02_bim_takeoff passed (Listed-scope total: ${data['priced_scope_total_usd']:,.2f}, File size: {os.path.getsize(xlsx_path)} bytes)")
 
     def test_03_bim_render_view(self):
-        html_path = os.path.join(TEST_OUTPUT_DIR, "test_viewer.html")
         raw_res = handle_bim_render_view({
             "ifc_path": IFC_SAMPLE_PATH,
-            "output_html": html_path,
+            "output_html": "test_viewer.html",
             "max_elements": 120
         })
         self.assertFalse(raw_res.startswith("Error"), f"Render view failed: {raw_res}")
         data = json.loads(raw_res)
+        html_path = data["output_html"]  # final confined path returned by the tool
         self.assertTrue(os.path.exists(html_path))
         with open(html_path, encoding="utf-8") as viewer_file:
             html = viewer_file.read()
