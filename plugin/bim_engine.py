@@ -98,6 +98,88 @@ def _guard_output_path(name: Optional[str], suffix: str, overwrite: bool = False
         final = candidate
     return final
 
+
+def _agent_cwd() -> str:
+    """Directory relative IFC paths are resolved against.
+
+    Inside Hermes, os.getcwd() stays the gateway directory. The session
+    workspace is resolve_agent_cwd() / TERMINAL_CWD. Outside Hermes, the
+    process working directory is that workspace.
+    """
+    try:
+        from agent.runtime_cwd import resolve_agent_cwd
+    except Exception:
+        resolve_agent_cwd = None
+    if resolve_agent_cwd is not None:
+        try:
+            resolved = resolve_agent_cwd()
+        except Exception:
+            resolved = None
+        if resolved is not None:
+            text = os.fspath(resolved)
+            if text and os.path.isdir(text):
+                return os.path.realpath(text)
+    terminal = os.environ.get("TERMINAL_CWD", "").strip()
+    if terminal:
+        expanded = os.path.expanduser(terminal)
+        if os.path.isdir(expanded):
+            return os.path.realpath(expanded)
+    return os.path.realpath(os.getcwd())
+
+
+def _resolve_ifc_path(ifc_path: str) -> str:
+    """Resolve a model path to an existing file.
+
+    Absolute paths are used as given. Relative paths join the session
+    working directory. This does not affect output confinement: generated
+    files still go through ``_guard_output_path``.
+    """
+    if not isinstance(ifc_path, str) or not ifc_path.strip() or "\x00" in ifc_path:
+        raise FileNotFoundError(f"IFC file not found: {ifc_path}")
+    raw = os.path.expanduser(ifc_path.strip())
+    if not os.path.isabs(raw):
+        raw = os.path.join(_agent_cwd(), raw)
+    resolved = os.path.realpath(raw)
+    if not os.path.isfile(resolved):
+        raise FileNotFoundError(f"IFC file not found: {ifc_path}")
+    return resolved
+
+
+def _ifc_vertices_to_y_up(verts) -> List[float]:
+    """Convert IFC world coordinates (Z-up) to Three.js coordinates (Y-up).
+
+    Applied once at geometry export: (x, y, z) -> (x, z, -y). This is a
+    proper rotation, so triangle winding stays valid. The viewer grid,
+    lights, camera up-axis, orbit, and raycasting then share one Y-up scene.
+    """
+    converted: List[float] = []
+    for i in range(0, len(verts) - 2, 3):
+        x = float(verts[i])
+        y = float(verts[i + 1])
+        z = float(verts[i + 2])
+        converted.append(round(x, 3))
+        converted.append(round(z, 3))
+        converted.append(round(-y, 3))
+    return converted
+
+
+def _viewer_material(elem) -> tuple:
+    """Display color and opacity. is_a(type) includes IFC subtypes."""
+    if elem.is_a("IfcWall"):
+        return "#cfd8dc", 1.0
+    if elem.is_a("IfcSlab"):
+        return "#90a4ae", 1.0
+    if elem.is_a("IfcDoor"):
+        return "#8d6e63", 1.0
+    if elem.is_a("IfcWindow"):
+        return "#4fc3f7", 0.65
+    if elem.is_a("IfcRoof"):
+        return "#b0bec5", 1.0
+    if elem.is_a("IfcColumn"):
+        return "#546e7a", 1.0
+    return "#78909c", 1.0
+
+
 def compute_sha256(path: str) -> str:
     hasher = hashlib.sha256()
     with open(path, "rb") as f:
@@ -190,8 +272,7 @@ def _excel_literal(value: Any) -> Any:
     return value
 
 def inspect_bim_model(ifc_path: str) -> Dict[str, Any]:
-    if not os.path.exists(ifc_path):
-        raise FileNotFoundError(f"IFC file not found: {ifc_path}")
+    ifc_path = _resolve_ifc_path(ifc_path)
         
     t0 = time.time()
     sha = compute_sha256(ifc_path)
@@ -340,8 +421,7 @@ def generate_5d_takeoff(
     output_xlsx: Optional[str] = None,
     overwrite: bool = False
 ) -> Dict[str, Any]:
-    if not os.path.exists(ifc_path):
-        raise FileNotFoundError(f"IFC file not found: {ifc_path}")
+    ifc_path = _resolve_ifc_path(ifc_path)
     # Resolve the (model-supplied) output name to a confined path BEFORE any
     # work or write. A workbook is always written (see the tool schema).
     final_xlsx = _guard_output_path(output_xlsx, ".xlsx", overwrite=overwrite)
@@ -605,8 +685,7 @@ def render_3d_viewer(
 ) -> Dict[str, Any]:
     if type(max_elements) is not int or not 0 <= max_elements <= MAX_RENDER_ELEMENTS:
         raise ValueError(f"max_elements must be between 0 and {MAX_RENDER_ELEMENTS}")
-    if not os.path.exists(ifc_path):
-        raise FileNotFoundError(f"IFC file not found: {ifc_path}")
+    ifc_path = _resolve_ifc_path(ifc_path)
     # Resolve the (model-supplied) output name to a confined path BEFORE any
     # work or write. A viewer HTML file is always written (see the tool schema).
     final_html = _guard_output_path(output_html, ".html", overwrite=overwrite)
@@ -636,21 +715,7 @@ def render_3d_viewer(
             faces = shape.geometry.faces
             
             category = elem.is_a()
-            color = "#78909c"
-            opacity = 1.0
-            if category == "IfcWall":
-                color = "#cfd8dc"
-            elif category == "IfcSlab":
-                color = "#90a4ae"
-            elif category == "IfcDoor":
-                color = "#8d6e63"
-            elif category == "IfcWindow":
-                color = "#4fc3f7"
-                opacity = 0.65
-            elif category == "IfcRoof":
-                color = "#b0bec5"
-            elif category == "IfcColumn":
-                color = "#546e7a"
+            color, opacity = _viewer_material(elem)
                 
             meshes.append({
                 "id": elem.id(),
@@ -658,7 +723,7 @@ def render_3d_viewer(
                 "type": category,
                 "color": color,
                 "opacity": opacity,
-                "vertices": [round(v, 3) for v in verts],
+                "vertices": _ifc_vertices_to_y_up(verts),
                 "faces": list(faces)
             })
         except Exception:
@@ -713,8 +778,9 @@ def render_3d_viewer(
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x13141f);
   
-  const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-  camera.position.set(24, 18, 28);
+  const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 5000);
+  // Exported vertices are already Y-up. Keep the camera, orbit, and grid on that axis.
+  camera.up.set(0, 1, 0);
   
   const renderer = new THREE.WebGLRenderer({{ antialias: true }});
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -724,21 +790,17 @@ def render_3d_viewer(
   const controls = new THREE.OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.dampingFactor = 0.05;
+  // OrbitControls uses camera.up as the orbit axis. Pan across the ground plane.
+  controls.screenSpacePanning = false;
   
-  const ambientLight = new THREE.AmbientLight(0xffffff, 0.75);
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.62);
   scene.add(ambientLight);
   
-  const sunLight = new THREE.DirectionalLight(0xffffff, 0.85);
-  sunLight.position.set(30, 50, 30);
+  const sunLight = new THREE.DirectionalLight(0xfff4e0, 0.82);
   scene.add(sunLight);
   
-  const fillLight = new THREE.DirectionalLight(0x7aa2f7, 0.35);
-  fillLight.position.set(-30, -20, -30);
+  const fillLight = new THREE.DirectionalLight(0x9ab0ff, 0.38);
   scene.add(fillLight);
-  
-  const grid = new THREE.GridHelper(50, 50, 0x414868, 0x24283b);
-  grid.position.y = -0.01;
-  scene.add(grid);
   
   const rootGroup = new THREE.Group();
   scene.add(rootGroup);
@@ -765,9 +827,63 @@ def render_3d_viewer(
     clickable.push(mesh);
   }});
   
-  const box = new THREE.Box3().setFromObject(rootGroup);
-  const center = box.getCenter(new THREE.Vector3());
-  rootGroup.position.sub(center);
+  function frameModel() {{
+    const gridColor = 0x414868;
+    const gridMinor = 0x24283b;
+    if (!clickable.length) {{
+      camera.position.set(16, 12, 20);
+      camera.lookAt(0, 0, 0);
+      controls.target.set(0, 0, 0);
+      controls.update();
+      const grid = new THREE.GridHelper(40, 20, gridColor, gridMinor);
+      grid.position.y = -0.01;
+      scene.add(grid);
+      sunLight.position.set(30, 50, 20);
+      fillLight.position.set(-20, 18, -16);
+      return;
+    }}
+    const box = new THREE.Box3().setFromObject(rootGroup);
+    const center = box.getCenter(new THREE.Vector3());
+    rootGroup.position.x -= center.x;
+    rootGroup.position.z -= center.z;
+    rootGroup.position.y -= box.min.y;
+    rootGroup.updateMatrixWorld(true);
+    
+    const placed = new THREE.Box3().setFromObject(rootGroup);
+    const placedSize = placed.getSize(new THREE.Vector3());
+    const target = new THREE.Vector3(0, placedSize.y * 0.42, 0);
+    const radius = 0.5 * Math.sqrt(
+      placedSize.x * placedSize.x + placedSize.y * placedSize.y + placedSize.z * placedSize.z
+    );
+    const aspect = Math.max(window.innerWidth / Math.max(window.innerHeight, 1), 0.5);
+    const vFov = 45 * Math.PI / 180;
+    const hFov = 2 * Math.atan(Math.tan(vFov / 2) * aspect);
+    const fitFov = Math.min(vFov, hFov);
+    const dist = (radius / Math.sin(fitFov / 2)) * 1.08;
+    const azimuth = Math.PI / 4.4;
+    const elevation = Math.PI / 7;
+    camera.up.set(0, 1, 0);
+    camera.position.set(
+      target.x + dist * Math.cos(elevation) * Math.sin(azimuth),
+      target.y + dist * Math.sin(elevation),
+      target.z + dist * Math.cos(elevation) * Math.cos(azimuth)
+    );
+    camera.near = Math.max(0.05, dist / 200);
+    camera.far = Math.max(500, dist * 20);
+    camera.lookAt(target);
+    camera.updateProjectionMatrix();
+    controls.target.copy(target);
+    controls.update();
+    
+    sunLight.position.set(dist * 0.7, dist * 1.05, dist * 0.25);
+    fillLight.position.set(-dist * 0.55, dist * 0.38, -dist * 0.2);
+    
+    const gridSpan = Math.max(placedSize.x, placedSize.z, 10) * 2.4;
+    const grid = new THREE.GridHelper(gridSpan, 24, gridColor, gridMinor);
+    grid.position.y = -0.01;
+    scene.add(grid);
+  }}
+  frameModel();
   
   // Raycaster for element clicking
   const raycaster = new THREE.Raycaster();

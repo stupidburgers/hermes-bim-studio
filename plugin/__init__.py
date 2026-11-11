@@ -59,7 +59,7 @@ BIM_INSPECT_SCHEMA = {
         "properties": {
             "ifc_path": {
                 "type": "string",
-                "description": "Absolute or relative path to the .ifc building model file.",
+                "description": "Path to the .ifc model. Relative paths resolve against the session working directory, not the gateway process directory.",
             },
         },
         "required": ["ifc_path"],
@@ -81,7 +81,7 @@ BIM_TAKEOFF_SCHEMA = {
         "properties": {
             "ifc_path": {
                 "type": "string",
-                "description": "Path to the .ifc building model file.",
+                "description": "Path to the .ifc model. Relative paths resolve against the session working directory, not the gateway process directory.",
             },
             "rates": {
                 "type": "object",
@@ -104,15 +104,16 @@ BIM_RENDER_VIEW_SCHEMA = {
     "name": "bim_render_view",
     "description": (
         "Generate a self-contained interactive WebGL 3D view of selected IFC elements "
-        "using vendored Three.js assets (no network request). Supports orbit/zoom and "
-        "click-to-inspect element identity."
+        "using vendored Three.js assets (no network request). IFC Z-up geometry is "
+        "converted once to the viewer's Y-up scene so floors stay horizontal. "
+        "Supports orbit around the vertical axis, zoom, and click-to-inspect element identity."
     ),
     "parameters": {
         "type": "object",
         "properties": {
             "ifc_path": {
                 "type": "string",
-                "description": "Path to the .ifc building model file.",
+                "description": "Path to the .ifc model. Relative paths resolve against the session working directory, not the gateway process directory.",
             },
             "output_html": {
                 "type": "string",

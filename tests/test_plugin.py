@@ -79,5 +79,58 @@ class TestHermesBimStudioPlugin(unittest.TestCase):
         self.assertIn("::preview{", data["preview_directive"])
         print(f"[PASS] test_03_bim_render_view passed ({data['rendered_meshes']} meshes rendered, HTML size: {os.path.getsize(html_path)} bytes)")
 
+    def test_04_relative_ifc_path_uses_session_cwd(self):
+        """A relative model path resolves against the session workspace, not the process cwd.
+
+        Generated files stay under the plugin data directory.
+        """
+        previous_cwd = os.getcwd()
+        previous_terminal = os.environ.get("TERMINAL_CWD")
+        previous_home = os.environ.get("HERMES_HOME")
+        with tempfile.TemporaryDirectory(dir=TEST_OUTPUT_DIR) as process_cwd, tempfile.TemporaryDirectory(dir=TEST_OUTPUT_DIR) as hermes_home:
+            os.environ["TERMINAL_CWD"] = os.path.dirname(IFC_SAMPLE_PATH)
+            os.environ["HERMES_HOME"] = hermes_home
+            try:
+                os.chdir(process_cwd)
+                relative = os.path.basename(IFC_SAMPLE_PATH)
+                inspected = handle_bim_inspect({"ifc_path": relative})
+                self.assertFalse(inspected.startswith("Error"), inspected)
+                self.assertEqual(json.loads(inspected)["project_name"], "Projekt-FZK-Haus")
+
+                taken = handle_bim_takeoff({
+                    "ifc_path": relative,
+                    "output_xlsx": "sample-rates.xlsx",
+                    "rates": {
+                        "masonry_wall_m2": 70,
+                        "concrete_slab_m3": 480,
+                        "door_unit": 250,
+                        "window_unit": 320,
+                    },
+                })
+                self.assertFalse(taken.startswith("Error"), taken)
+                data = json.loads(taken)
+                quantities = {item["wbs"]: item["qty"] for item in data["line_items"]}
+                self.assertAlmostEqual(quantities["02.01"], 190.465524, places=6)
+                self.assertAlmostEqual(quantities["01.01"], 76.99159, places=5)
+                self.assertAlmostEqual(data["priced_scope_total_usd"], 55058.55, places=2)
+                workbook = os.path.realpath(data["output_xlsx"])
+                data_root = os.path.realpath(os.path.join(
+                    hermes_home, "plugin-data", "hermes-bim-studio"
+                ))
+                self.assertEqual(os.path.commonpath([workbook, data_root]), data_root)
+                self.assertEqual(os.path.basename(workbook), "sample-rates.xlsx")
+                self.assertFalse(os.path.exists(os.path.join(process_cwd, "sample-rates.xlsx")))
+                self.assertFalse(os.path.exists(os.path.join(os.path.dirname(IFC_SAMPLE_PATH), "sample-rates.xlsx")))
+            finally:
+                os.chdir(previous_cwd)
+                if previous_terminal is None:
+                    os.environ.pop("TERMINAL_CWD", None)
+                else:
+                    os.environ["TERMINAL_CWD"] = previous_terminal
+                if previous_home is None:
+                    os.environ.pop("HERMES_HOME", None)
+                else:
+                    os.environ["HERMES_HOME"] = previous_home
+
 if __name__ == '__main__':
     unittest.main()

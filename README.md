@@ -4,7 +4,7 @@ Ask Hermes to read a local IFC file, report wall and slab quantities with their 
 
 <!-- DEMO_VIDEO -->
 
-![Offline viewer of the Projekt-FZK-Haus sample, with 13 walls, 4 slabs, 5 doors, 11 windows, and 33 rendered meshes](docs/screenshots/sample-house-viewer.png)
+![Upright offline viewer of the Projekt-FZK-Haus sample, with 13 walls, 4 slabs, 5 doors, 11 windows, and 33 rendered meshes](docs/screenshots/sample-house-viewer.png)
 
 Headless Chrome capture (1440×900) of the HTML page `bim_render_view` wrote for [`samples/sample_house.ifc`](samples/sample_house.ifc).
 
@@ -20,7 +20,7 @@ The plugin registers three tools from [`plugin/`](plugin/):
 | --- | --- |
 | `bim_inspect` | Project name, IFC schema, SHA-256, and counts of storeys, spaces, walls, slabs, doors, windows, columns, beams, and roofs. It also reports two model-quality findings: elements among walls, slabs, doors, windows, columns, and beams with no `IfcRelContainedInSpatialStructure`, and walls or slabs with no name. |
 | `bim_takeoff` | Wall **net side area** and slab **net volume** from each element's `BaseQuantities`, converted to m² and m³ with that quantity's IFC unit. Doors and windows are entity counts. Every line includes how many elements were measured. Optional caller-supplied rates price those four lines only. |
-| `bim_render_view` | A single HTML file with the model geometry and vendored Three.js r128 plus OrbitControls inlined. Orbit, pan, zoom, and click a mesh to see its name, IFC type, and element id. The tool returns a Hermes Desktop `::preview{file="..."}` directive. |
+| `bim_render_view` | A single HTML file with the model geometry and vendored Three.js r128 plus OrbitControls inlined. IFC Z-up geometry is converted once to Y-up, so the building stands upright, the grid is the ground, and orbit stays around the vertical axis. Click a mesh to see its name, IFC type, and element id. The tool returns a Hermes Desktop `::preview{file="..."}` directive. |
 
 On the bundled fixture, `bim_inspect` reports project **Projekt-FZK-Haus**, schema **IFC4**, 2 storeys, 7 spaces, 13 walls, 4 slabs, 5 doors, 11 windows, 0 columns, 4 beams, 0 roofs, and no findings.
 

@@ -18,7 +18,7 @@ Hermes BIM Studio gives Hermes a bounded IFC inspection and quantity-reporting w
 |------|--------------|
 | `bim_inspect` | Parses an IFC model and reports project metadata, storeys/spaces, and selected element counts. It flags limited data-quality issues (missing spatial containment, unnamed walls/slabs); it does not certify building-code compliance. |
 | `bim_takeoff` | Reports IFC `BaseQuantities.NetSideArea` for walls and `BaseQuantities.NetVolume` for slabs, converted to SI using each quantity's IFC unit. Reports per-element coverage and missing data. Doors/windows are entity counts. Optional caller-supplied USD rates produce a total for these four categories only; this is not a whole-project estimate. |
-| `bim_render_view` | Generates a self-contained interactive Three.js viewer (orbit/zoom and click element identity) with vendored scripts, and returns a `::preview{file="..."}` directive for Hermes Desktop. |
+| `bim_render_view` | Generates a self-contained interactive Three.js viewer (orbit around the vertical axis, zoom, and click element identity) with vendored scripts. IFC Z-up geometry is converted once to the viewer's Y-up scene so floors stay horizontal. Returns a `::preview{file="..."}` directive for Hermes Desktop. |
 
 ## Beyond a prompt or a skill
 
@@ -30,9 +30,10 @@ Hermes BIM Studio gives Hermes a bounded IFC inspection and quantity-reporting w
 ## Install
 
 ```bash
-hermes plugins install hermes-bim-studio        # once listed in the catalog
-# or directly from the repo:
-hermes plugins install stupidburgers/hermes-bim-studio
+hermes plugins install hermes-bim-studio                 # catalog entry uses subdir: plugin
+# Direct git install must name the plugin directory. The repository root has no
+# plugin.yaml; installing owner/repo without /plugin warns and does not load this package.
+hermes plugins install stupidburgers/hermes-bim-studio/plugin
 ```
 
 Dependencies (`ifcopenshell`, `openpyxl`) install automatically via the manifest.
@@ -58,7 +59,7 @@ The 3D viewer HTML is fully self-contained (inline geometry, inlined Three.js ru
 1. **Semantic parse** — IFC entities and selected project/spatial metadata are read with `ifcopenshell`.
 2. **Quantity extraction** — wall `NetSideArea` and slab `NetVolume` are read from `BaseQuantities`; each quantity's explicit or project unit is converted to SI. Missing, malformed, or ambiguous values are reported with element coverage, not estimated.
 3. **Optional pricing** — caller-supplied USD rates are multiplied by complete quantities or element counts. The resulting total is for the four listed categories only, never the whole project.
-4. **Viewer generation** — selected IFC element meshes are embedded in a self-contained HTML page with vendored Three.js and orbit/click inspection.
+4. **Viewer generation** — selected IFC element meshes are converted from IFC Z-up to Three.js Y-up once, then embedded in a self-contained HTML page with vendored Three.js, a vertical orbit axis, and click inspection.
 
 ## Development
 
@@ -73,7 +74,7 @@ Multi-platform CI (Ubuntu + Windows, Python 3.11/3.12) runs both unittest module
 ## Disclosure
 
 - Reads the IFC path supplied to a tool and the viewer scripts bundled with the plugin.
-- Writes a workbook (`bim_takeoff_5d.xlsx`) and/or viewer (`bim_viewer_3d.html`) beside the IFC by default; caller-supplied output paths override these locations. Existing output files at those paths are overwritten.
+- Writes a workbook (`bim_takeoff_5d.xlsx`) and/or viewer (`bim_viewer_3d.html`) under `<HERMES_HOME>/plugin-data/hermes-bim-studio/`. Output arguments are bare file names only (no directories, `..`, or absolute paths). An existing file is kept unless `overwrite` is true; otherwise a timestamped name is used.
 - Generated files can contain project metadata, the IFC path and SHA-256, quantities, element IDs, and (in the viewer) selected model geometry. Treat them as potentially sensitive project data.
 - No network calls, shell commands, background processes, stored credentials, or telemetry.
 

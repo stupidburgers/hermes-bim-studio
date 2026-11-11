@@ -4,6 +4,7 @@ import tempfile
 import unittest
 
 import ifcopenshell
+import ifcopenshell.geom as geom
 
 from plugin import handle_bim_render_view
 from plugin.bim_engine import _excel_literal
@@ -53,6 +54,80 @@ class TestViewerEscaping(unittest.TestCase):
         self.assertEqual(_excel_literal("=1+1"), "'=1+1")
         self.assertEqual(_excel_literal("  =1+1"), "'  =1+1")
         self.assertEqual(_excel_literal(42), 42)
+
+    def test_exported_geometry_converts_ifc_z_up_to_y_up(self):
+        """IFC world coordinates are Z-up. Exported viewer vertices must be Y-up."""
+        settings = geom.settings()
+        settings.set(settings.USE_WORLD_COORDS, True)
+        ifc = ifcopenshell.open(IFC_PATH)
+        wall = next(elem for elem in ifc.by_type("IfcWall") if elem.id() == 21966)
+        raw = geom.create_shape(settings, wall).geometry.verts
+        raw_y = [raw[i] for i in range(1, len(raw), 3)]
+        raw_z = [raw[i] for i in range(2, len(raw), 3)]
+
+        with tempfile.TemporaryDirectory(dir=OUTPUT_DIR) as hermes_home:
+            previous = os.environ.get("HERMES_HOME")
+            os.environ["HERMES_HOME"] = hermes_home
+            try:
+                response = json.loads(handle_bim_render_view({
+                    "ifc_path": IFC_PATH,
+                    "output_html": "up-axis.html",
+                    "max_elements": 120,
+                    "overwrite": True,
+                }))
+            finally:
+                if previous is None:
+                    os.environ.pop("HERMES_HOME", None)
+                else:
+                    os.environ["HERMES_HOME"] = previous
+            output_path = response["output_html"]
+            data_root = os.path.realpath(os.path.join(
+                hermes_home, "plugin-data", "hermes-bim-studio"
+            ))
+            self.assertEqual(os.path.commonpath([os.path.realpath(output_path), data_root]), data_root)
+            with open(output_path, encoding="utf-8") as viewer_file:
+                html = viewer_file.read()
+
+        self.assertNotIn("https://cdn.", html)
+        self.assertIn("camera.up.set(0, 1, 0)", html)
+        self.assertIn("screenSpacePanning = false", html)
+        self.assertIn("GridHelper", html)
+        self.assertNotIn("rootGroup.rotation", html)
+        marker = "const meshesData = "
+        start = html.index(marker) + len(marker)
+        meshes = json.loads(html[start:html.index(";\n", start)])
+        exported = next(mesh for mesh in meshes if mesh["id"] == 21966)
+        self.assertEqual(exported["name"], "Wand-Ext-ERDG-1")
+        self.assertEqual(exported["type"], "IfcWallStandardCase")
+
+        xs = exported["vertices"][0::3]
+        ys = exported["vertices"][1::3]
+        zs = exported["vertices"][2::3]
+        self.assertAlmostEqual(max(ys) - min(ys), max(raw_z) - min(raw_z), places=2)
+        self.assertAlmostEqual(max(zs) - min(zs), max(raw_y) - min(raw_y), places=2)
+        self.assertAlmostEqual(min(ys), round(min(raw_z), 3), places=3)
+        self.assertAlmostEqual(max(ys), round(max(raw_z), 3), places=3)
+        self.assertAlmostEqual(min(zs), round(-max(raw_y), 3), places=3)
+        self.assertAlmostEqual(max(zs), round(-min(raw_y), 3), places=3)
+        self.assertGreater(max(ys) - min(ys), max(xs) - min(xs))
+
+        spans = _axis_spans(meshes)
+        self.assertLess(spans[1], spans[0])
+        self.assertLess(spans[1], spans[2])
+        self.assertGreater(spans[1], 5.0)
+        self.assertLess(spans[1], 8.0)
+
+
+def _axis_spans(meshes):
+    mins = [float("inf")] * 3
+    maxs = [float("-inf")] * 3
+    for mesh in meshes:
+        verts = mesh["vertices"]
+        for index in range(0, len(verts), 3):
+            for axis in range(3):
+                mins[axis] = min(mins[axis], verts[index + axis])
+                maxs[axis] = max(maxs[axis], verts[index + axis])
+    return [maxs[axis] - mins[axis] for axis in range(3)]
 
 
 if __name__ == "__main__":
