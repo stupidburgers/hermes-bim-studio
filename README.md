@@ -24,7 +24,7 @@ The plugin registers three tools from [`plugin/`](plugin/):
 
 On the bundled fixture, `bim_inspect` reports project **Projekt-FZK-Haus**, schema **IFC4**, 2 storeys, 7 spaces, 13 walls, 4 slabs, 5 doors, 11 windows, 0 columns, 4 beams, 0 roofs, and no findings.
 
-`bim_takeoff` always writes an `.xlsx` workbook with three sheets: **Executive Summary**, **Audit & Provenance**, and **Unavailable Measurements**. `bim_render_view` always writes an `.html` viewer. In this repository the default filenames, placed beside the IFC, are `bim_takeoff_5d.xlsx` and `bim_viewer_3d.html`.
+`bim_takeoff` always writes an `.xlsx` workbook with three sheets: **Executive Summary**, **Audit & Provenance**, and **Unavailable Measurements**. `bim_render_view` always writes an `.html` viewer. Both files go under `<HERMES_HOME>/plugin-data/hermes-bim-studio/`. Pass a bare file name (`report.xlsx`, `model.html`). The defaults are `bim_takeoff_5d.xlsx` and `bim_viewer_3d.html`. An existing file at that name is kept; the new file gets a `YYYYMMDD-HHMMSS` suffix unless you pass `overwrite: true`.
 
 ## Install
 
@@ -35,7 +35,7 @@ hermes plugins enable hermes-bim-studio
 
 `hermes-bim-studio` is the catalog key in [NousResearch/hermes-agent `plugin-catalog/hermes-bim-studio.yaml`](https://github.com/NousResearch/hermes-agent/blob/main/plugin-catalog/hermes-bim-studio.yaml). That entry points at this repository with `subdir: plugin`, so the installer checks out the **reviewed commit recorded there**, then installs the manifest dependencies `ifcopenshell` (>=0.9.0, <0.10) and `openpyxl` (>=3.1.2, <4) after you accept them.
 
-As of 2026-11-11 the catalog pin is `1eef602bbee93b5893b9cd769d0d8d2b2d9a12a8`. That pin also saves the workbook and the viewer under `<HERMES_HOME>/plugin-data/hermes-bim-studio/` as bare `.xlsx` / `.html` filenames. The tool behavior below was run from this repository's plugin code, whose default is to write beside the IFC and overwrite an existing file at the chosen path.
+As of 2026-11-11 the catalog pin is `1eef602bbee93b5893b9cd769d0d8d2b2d9a12a8`. The tool behavior below is that pin: reports are written only under `<HERMES_HOME>/plugin-data/hermes-bim-studio/`.
 
 To install the `plugin/` directory from this repository's default branch:
 
@@ -63,7 +63,7 @@ Running the three handlers on that file (Python 3.12.3, ifcopenshell 0.9.0.post1
   "schema": "IFC4",
   "file_size_bytes": 2526544,
   "sha256": "ea6f04eaf92fac4d7ad0038bc3d2dfea4c094dd3f516ecc33c50bf1835ca108d",
-  "load_time_sec": 0.049,
+  "load_time_sec": 0.06,
   "inventory": {
     "storeys": 2,
     "spaces": 7,
@@ -133,15 +133,21 @@ Running the three handlers on that file (Python 3.12.3, ifcopenshell 0.9.0.post1
 }
 ```
 
-Line totals are rounded to cents (76.99159 × 480 = 36,955.96; 190.465524 × 70 = 13,332.59; 5 × 250 = 1,250; 11 × 320 = 3,520). This run wrote a 7,705-byte workbook.
-
-`bim_render_view` with `max_elements` 150 rendered **33** meshes (every wall, slab, door, and window in the file; it has no columns or roofs) and returned:
+Line totals are rounded to cents (76.99159 × 480 = 36,955.96; 190.465524 × 70 = 13,332.59; 5 × 250 = 1,250; 11 × 320 = 3,520). This run set `HERMES_HOME=/tmp/bim-sample-home` and passed the bare name `sample_takeoff.xlsx`. The tool returned:
 
 ```text
-::preview{file="/tmp/bim-readme/bim_viewer_3d.html"}
+/tmp/bim-sample-home/plugin-data/hermes-bim-studio/sample_takeoff.xlsx
 ```
 
-That page was 900,717 bytes. It contains no `https://cdn.` URL. The screenshot above is that file.
+That workbook was 7,704 bytes. Calling the tool again with the same bare name, and without `overwrite: true`, left that file in place and wrote `sample_takeoff-20261111-030120.xlsx` beside it. A path with a directory separator (`/tmp/nope.html`) was rejected and nothing was written there.
+
+`bim_render_view` with the bare name `sample_viewer.html` and `max_elements` 150 rendered **33** meshes (every wall, slab, door, and window in the file; it has no columns or roofs) and returned:
+
+```text
+::preview{file="/tmp/bim-sample-home/plugin-data/hermes-bim-studio/sample_viewer.html"}
+```
+
+That page was 900,717 bytes. It contains no `https://cdn.` URL. The screenshot above is that viewer. Omitting the file name used `bim_takeoff_5d.xlsx` and `bim_viewer_3d.html` in the same directory.
 
 ## How it works
 
@@ -149,6 +155,7 @@ That page was 900,717 bytes. It contains no `https://cdn.` URL. The screenshot a
 2. **Read named quantities.** For each `IfcWall`, the takeoff looks up a single `BaseQuantities` / `NetSideArea` (`IfcQuantityArea`). For each `IfcSlab`, it looks up `NetVolume` (`IfcQuantityVolume`). The value is multiplied by the IFC unit scale from `ifcopenshell.util.unit`. A missing, ambiguous, empty, non-finite, negative, unitless, or wrong-unit quantity is recorded on the **Unavailable Measurements** sheet and omitted from the sum.
 3. **Price only a complete listed scope.** Door and window quantities are `len(IfcDoor)` and `len(IfcWindow)`. A line total is quantity × your rate, and only when that line's coverage is complete. `priced_scope_total_usd` is the sum of the four line totals when every line is complete and has a rate (`masonry_wall_m2`, `concrete_slab_m3`, `door_unit`, `window_unit`). The audit sheet stores the IFC path, SHA-256, schema, sources, and coverage.
 4. **Build the viewer locally.** The renderer tessellates up to 60 walls, 30 slabs, 20 doors, 20 windows, 10 columns, and 10 roofs, then stops at `max_elements` (0–150, default 150). Meshes are embedded in HTML with the Three.js r128 files from [`plugin/vendor/`](plugin/vendor/). IFC names are escaped before they are written into the page. Spreadsheet text that begins with `=`, `+`, `-`, or `@` is prefixed so Excel keeps it as text.
+5. **Write only inside the plugin data directory.** `HERMES_HOME` is the environment variable when set, otherwise `get_hermes_home()` if Hermes is installed, otherwise `~/.hermes`. The output name has to be a bare file name with the right suffix. Separators, `..`, absolute paths, drive letters, control characters, and a symlink at the destination are rejected. The returned JSON has the absolute path that was written.
 
 The plugin Python reads the IFC path you pass and the vendored viewer scripts. It starts no shell and reads no API key. The viewer scripts are the MIT-licensed upstream r128 files; see [`plugin/vendor/THIRD_PARTY_NOTICES.md`](plugin/vendor/THIRD_PARTY_NOTICES.md).
 
@@ -163,14 +170,14 @@ env -u PYTHONPATH python3 -m unittest discover -s tests -v
 
 That is the command in [`.github/workflows/ci.yml`](.github/workflows/ci.yml). CI runs it on Ubuntu and Windows for Python 3.11 and 3.12.
 
-A local run on Python 3.12.3 (Ubuntu, ifcopenshell 0.9.0.post1) reported:
+A local run on Python 3.12.3 (Ubuntu, ifcopenshell 0.9.0.post1, `HERMES_HOME` pointed at a temp directory) reported:
 
 ```text
-Ran 13 tests in 5.280s
+Ran 26 tests in 5.485s
 OK
 ```
 
-The 13 tests cover the fixture inspect counts, the fixture takeoff quantities (wall area 190.465524 m², slab volume 76.99159 m³) and workbook wording, a 33-mesh offline viewer, HTML/script escaping, the 0–150 render limit, Excel formula neutralization, unit conversion (square millimetres to m²), a rejected area-unit on slab volume, a withheld total when a rate or a base quantity is missing, and a zero quantity when a category has no elements.
+Those tests cover the fixture inspect counts, the fixture takeoff quantities (wall area 190.465524 m², slab volume 76.99159 m³) and workbook wording, a 33-mesh offline viewer, HTML/script escaping, the 0–150 render limit, Excel formula neutralization, unit conversion (square millimetres to m²), a rejected area-unit on slab volume, a withheld total when a rate or a base quantity is missing, a zero quantity when a category has no elements, and confined output paths: bare names stay under `plugin-data/hermes-bim-studio/`, absolute paths, `..`, separators, and a wrong suffix are rejected, an existing file is kept unless `overwrite` is true, and a symlink at the destination is refused.
 
 ## Limitations
 
@@ -179,8 +186,7 @@ The 13 tests cover the fixture inspect counts, the fixture takeoff quantities (w
 - A category with zero elements is quantity 0. It still needs a rate before the four-line total is calculated. With no `rates` argument, every line total and the listed-scope total are empty (`pricing_status`: `not_priced_or_incomplete`).
 - Rates have to be finite and zero or positive. There is no default price list.
 - The viewer draws a capped subset. A mesh that fails to tessellate is skipped. A click shows that mesh's name, IFC class, and element id.
-- In this repository, both report tools always write a file. An existing file at the default path or at the path you pass is overwritten. The workbook and the viewer contain the IFC path, its SHA-256, quantities, element ids, and, in the viewer, mesh geometry.
-- The catalog pin named in **Install** keeps those writes under `<HERMES_HOME>/plugin-data/hermes-bim-studio/` and refuses to overwrite silently. Install that pin when you want that behavior.
+- Both report tools always write a file, and only under `<HERMES_HOME>/plugin-data/hermes-bim-studio/`. The name you pass is a bare `.xlsx` or `.html` file name. The same name again, without `overwrite: true`, writes a timestamped sibling and leaves the first file untouched. The workbook and the viewer contain the IFC path, its SHA-256, quantities, element ids, and, in the viewer, mesh geometry.
 - CI covers Ubuntu and Windows (Python 3.11 and 3.12). macOS is not in that workflow.
 
 ## License
